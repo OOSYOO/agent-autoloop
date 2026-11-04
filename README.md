@@ -191,7 +191,7 @@ Agent 结束了这一轮，问了你一个问题。它现在不占进程、不�
 
 ### 实测性能
 
-Apple M5 Pro、24 GB、Node 24.21.0。写入逐条提交，事务落盘后才应答。`npm run benchmark` 的达标线按这台机器定，换台机器可能报未达标。
+Apple M5 Pro、24 GB、Node 24.21.0。写入逐条提交，事务落盘后才应答。`npm run benchmark` 的其他达标线按这台机器定，换台机器可能报未达标。空闲 RSS 预算经本人调整为 150 MB（十进制），持久化写入门槛为 100 条/秒；这不改变下表历史实测。
 
 | 指标 | 实测 |
 |---|---:|
@@ -246,3 +246,9 @@ Apple M5 Pro、24 GB、Node 24.21.0。写入逐条提交，事务落盘后才应
 </details>
 
 [MIT License](LICENSE)
+
+GitLab MR 审查的私有配置与人工确认见 [GitLab 审查配置](docs/gitlab-review.md)。
+
+GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](docs/gitlab-review.md)。
+
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 作为独立只读资料提供，不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。

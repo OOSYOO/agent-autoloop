@@ -1,0 +1,200 @@
+// Failure modes: dropped hub responses cause new event IDs or unrouted events count as successful dispatch.
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { scanProject } from "../plugins/gitlab/scan.ts";
+const sha = "a".repeat(40),
+  policy = "b".repeat(64);
+test("persists before posting and retries with stable ID", async () => {
+  const records: any[] = [];
+  const posted: any[] = [];
+  const io = {
+    list: async () => [
+      { iid: 1, state: "opened", draft: false, sha, reviewers: [{ id: 8 }], head_pipeline: { sha, status: "success" } },
+    ],
+    read: () => records.at(-1),
+    write: (r: any) => records.push(r),
+    post: async (e: any) => {
+      posted.push(e);
+      if (posted.length === 1) throw Error("lost");
+      return { event: 1, duplicate: true, routed: ["review"] };
+    },
+  };
+  const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 };
+  const project = { id: 42, ciMode: "required" as const };
+  await assert.rejects(scanProject(config, project, "team/project", policy, io));
+  await scanProject(config, project, "team/project", policy, io);
+  assert.equal(posted[0].id, posted[1].id);
+  assert.equal(records.at(-1).delivered, true);
+});
+
+test("unrouted record is retried only as a new observation after repair", async () => {
+  const records: any[] = [];
+  const posted: any[] = [];
+  let routed = false;
+  const io = {
+    list: async () => [
+      { iid: 1, state: "opened", draft: false, sha, reviewers: [{ id: 8 }], head_pipeline: { sha, status: "success" } },
+    ],
+    read: () => records.at(-1),
+    write: (r: any) => records.push(r),
+    post: async (e: any) => {
+      posted.push(e);
+      return { event: 1, duplicate: false, routed: routed ? ["review"] : [] };
+    },
+  };
+  const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 };
+  const project = { id: 42, ciMode: "required" as const };
+  await assert.rejects(scanProject(config, project, "team/project", policy, io));
+  routed = true;
+  await scanProject(config, project, "team/project", policy, { ...io, retryUnrouted: true });
+  assert.notEqual(posted[0].id, posted[1].id);
+});
+
+test("automatic scan never inherits a manual request ID", async () => {
+  const records: any[] = [
+    {
+      schema: 1,
+      instanceKey: "work",
+      projectId: 42,
+      mrIid: 1,
+      headSha: sha,
+      policyHash: policy,
+      eligible: true,
+      observation: 1,
+      requestId: "d".repeat(64),
+      origin: "manual",
+      delivered: true,
+    },
+  ];
+  const posted: any[] = [];
+  const io = {
+    list: async () => [
+      { iid: 1, state: "opened", draft: false, sha, reviewers: [{ id: 8 }], head_pipeline: { sha, status: "success" } },
+    ],
+    read: () => records.at(-1),
+    write: (r: any) => records.push(r),
+    post: async (e: any) => {
+      posted.push(e);
+      return { event: 1, duplicate: false, routed: ["review"] };
+    },
+  };
+  await scanProject(
+    { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 },
+    { id: 42, ciMode: "required" },
+    "team/project",
+    policy,
+    io,
+  );
+  assert.equal(posted.length, 1);
+  assert.notEqual(posted[0].id, `gitlab:${"d".repeat(64)}`);
+});
+
+test("delivered manual review without overrides is reused only for the same eligible observation", async () => {
+  const base = {
+    schema: 1,
+    instanceKey: "work",
+    projectId: 42,
+    mrIid: 1,
+    headSha: sha,
+    policyHash: policy,
+    eligible: true,
+    observation: 1,
+    requestId: "d".repeat(64),
+    origin: "manual",
+    delivered: true,
+    overrides: [],
+  };
+  for (const variant of ["same", "override", "head", "policy", "ineligible"] as const) {
+    const records: any[] = [{ ...base, overrides: variant === "override" ? ["ci"] : [] }];
+    const posted: any[] = [];
+    const head = variant === "head" ? "c".repeat(40) : sha;
+    await scanProject(
+      { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 },
+      { id: 42, ciMode: "required" },
+      "team/project",
+      variant === "policy" ? "e".repeat(64) : policy,
+      {
+        list: async () => [
+          {
+            iid: 1,
+            state: "opened",
+            draft: false,
+            sha: head,
+            reviewers: variant === "ineligible" ? [] : [{ id: 8 }],
+            head_pipeline: { sha: head, status: "success" },
+          },
+        ],
+        read: () => records.at(-1),
+        write: (record: any) => records.push(record),
+        post: async (event: any) => {
+          posted.push(event);
+          return { event: 1, duplicate: false, routed: ["review"] };
+        },
+      },
+    );
+    if (variant === "same") {
+      assert.equal(records.length, 1);
+      assert.equal(posted.length, 0);
+    } else {
+      assert.notEqual(records.at(-1).requestId, base.requestId);
+      assert.equal(posted.length, variant === "ineligible" ? 0 : 1);
+      if (posted.length) assert.equal(JSON.parse(posted[0].detail).overrides, undefined);
+    }
+  }
+});
+
+test("multiple matching review rules are not accepted as one dispatch", async () => {
+  const records: any[] = [];
+  const io = {
+    list: async () => [
+      { iid: 1, state: "opened", draft: false, sha, reviewers: [{ id: 8 }], head_pipeline: { sha, status: "success" } },
+    ],
+    read: () => records.at(-1),
+    write: (r: any) => records.push(r),
+    post: async () => ({ event: 1, duplicate: false, routed: ["one", "two"] }),
+  };
+  await assert.rejects(
+    scanProject(
+      { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 },
+      { id: 42, ciMode: "required" },
+      "team/project",
+      policy,
+      io,
+    ),
+  );
+  assert.notEqual(records.at(-1).delivered, true);
+});
+
+test("reviewer removal then reassignment at the same SHA produces a new request", async () => {
+  const records: any[] = [];
+  const posted: any[] = [];
+  let assigned = true;
+  const io = {
+    list: async () => [
+      {
+        iid: 1,
+        state: "opened",
+        draft: false,
+        sha,
+        reviewers: assigned ? [{ id: 8 }] : [],
+        head_pipeline: { sha, status: "success" },
+      },
+    ],
+    read: () => records.at(-1),
+    write: (r: any) => records.push(r),
+    post: async (e: any) => {
+      posted.push(e);
+      return { event: 1, duplicate: false, routed: ["review"] };
+    },
+  };
+  const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 };
+  const project = { id: 42, ciMode: "required" as const };
+  await scanProject(config, project, "team/project", policy, io);
+  assigned = false;
+  await scanProject(config, project, "team/project", policy, io);
+  assigned = true;
+  await scanProject(config, project, "team/project", policy, io);
+  assert.equal(posted.length, 2);
+  assert.notEqual(posted[0].id, posted[1].id);
+  assert.equal(records.at(-1).observation, 3);
+});

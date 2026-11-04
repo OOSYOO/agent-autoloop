@@ -233,3 +233,25 @@ test("an unrelated service file with the same name is left running and untouched
   assert.equal(readFileSync(service, "utf8"), "another program");
   assert.ok(!existsSync(it.called));
 });
+
+test("local installation removes its own wrapper and PATH links but keeps unrelated wrappers", async () => {
+  const { installLocal } = await import("../cli/local-install.ts");
+  const it = install();
+  rmSync(it.app, { recursive: true, force: true });
+  installLocal(repo, it.hub);
+  const wrapper = join(it.hub, "bin", "agent-autoloop");
+  rmSync(join(it.elsewhere, "agent-autoloop"));
+  symlinkSync(wrapper, join(it.elsewhere, "agent-autoloop"));
+  const done = it.run(["uninstall", "--yes"]);
+  assert.equal(done.status, 0, done.stderr);
+  assert.equal(isThere(wrapper), false);
+  assert.equal(isThere(join(it.elsewhere, "agent-autoloop")), false);
+  ownThingsAreThere(it);
+  const another = install();
+  rmSync(another.app, { recursive: true, force: true });
+  installLocal(repo, another.hub);
+  const foreign = join(another.hub, "bin", "agent-autoloop");
+  writeFileSync(foreign, "not our wrapper");
+  assert.equal(another.run(["uninstall", "--yes"]).status, 0);
+  assert.equal(readFileSync(foreign, "utf8"), "not our wrapper");
+});

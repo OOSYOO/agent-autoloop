@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 680" role="img" aria-labelledby="t">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 750" role="img" aria-labelledby="t">
 <title id="t">Agent Autoloop 架构图：内核在中间，其他都是插件</title>
+<desc>GitLab 使用通用 cron 和标准插件。每仓库复用 main 审查工作树，在其中启动 Codex 原生规则和 Skill 发现；可信 prompt 与独立 MR 资料进入只读审查，依据摘要贯穿缓存和批准。</desc>
 <defs>
 <style>
 svg{--bg:#faf9f5;--ink:#1d1c19;--muted:#6e6b64;--line:#d6d3cb;--card:#fff;--item:#f4f2ec;--accent:#c2491d;--core:#1d1c19;--core-ink:#faf9f5;--core-duty:#33302a;--core-chip:#282621;--core-line:#423f38;--core-sub:#b9b5ab;--core-accent:#ef8a62;--tag-bg:#3d261c;--tag-ink:#ffb08e;--you-bg:#fff4ee}
@@ -39,7 +40,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--accent)"/></marker>
 <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--muted)"/></marker>
 </defs>
-<rect class="bg" x="0" y="0" width="960" height="680" rx="18"/>
+<rect class="bg" x="0" y="0" width="960" height="750" rx="18"/>
 
 <!-- 顶部自动闭环回弧：自己干完 / 到点复查 -> 回到内核 -->
 <path class="back" d="M851 66V28H480V63"/>
@@ -175,4 +176,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <path class="flow" d="M775 620H803"/>
 <rect class="item" x="804" y="602" width="114" height="36" rx="8"/>
 <text x="861" y="625" class="r" text-anchor="middle">核对线上版本</text>
+<rect class="plug" x="22" y="670" width="916" height="60" rx="14"/>
+<text x="40" y="693" class="r">GitLab：通用 cron → 复用并更新 main 工作树 → Codex 原生规则 / Skill + prompt + MR 资料</text>
+<text x="40" y="715" class="s">只读审查 → findings 卡片 → 本人确认 → 复核同一依据后发布；不改日常开发目录，不增加调度层</text>
 </svg>

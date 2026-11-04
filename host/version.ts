@@ -9,6 +9,12 @@ const ROOT = path.join(import.meta.dirname, "..");
 export function commitOf(root = ROOT) {
   if (process.env.AGENT_AUTOLOOP_COMMIT) return process.env.AGENT_AUTOLOOP_COMMIT;
   try {
+    const manifestFile = path.join(root, "local-install.json");
+    if (existsSync(manifestFile)) {
+      const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+      if (manifest.kind === "agent-autoloop-local-install" && /^[a-f0-9]{64}$/.test(manifest.contentSha256))
+        return `local-${manifest.contentSha256.slice(0, 12)}`;
+    }
     // Only a checkout has its own .git entry; unpacked copies must not inherit a parent repository's commit.
     if (!existsSync(path.join(root, ".git"))) return "dev";
     const args = ["-C", root, "rev-parse", "HEAD"];
@@ -20,5 +26,6 @@ export function commitOf(root = ROOT) {
 
 export function versionLine() {
   const { version } = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  return `agent-autoloop ${version}（提交 ${commitOf().slice(0, 12)}）`;
+  const revision = commitOf();
+  return `agent-autoloop ${version}（${revision.startsWith("local-") ? `本地构建 ${revision.slice(6)}` : `提交 ${revision.slice(0, 12)}`}）`;
 }

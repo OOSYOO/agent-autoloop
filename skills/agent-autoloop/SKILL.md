@@ -158,3 +158,9 @@ MCP 客户端的启动程序填 `node`，参数为本机引擎绝对路径 `bin/
 ## 版本与卸载
 
 `agent-autoloop --version` 显示版本和提交。`agent-autoloop uninstall` 确认后删除自身程序、链接和服务，规则、密钥和记录保留；`--yes` 只跳过确认。
+
+GitLab MR 审查通过标准 gitlab Agent 插件、来源事件和卡片运行；配置和运行边界见仓库的 `docs/gitlab-review.md`。
+
+GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](../../docs/gitlab-review.md)。
+
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 作为独立只读资料提供，不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](../../docs/gitlab-review.md)。

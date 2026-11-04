@@ -45,7 +45,7 @@ test("a card shows its options while it's open, and what became of it after", ()
   const said = (card: Card) => JSON.stringify(render(card).body.elements);
   assert.match(said({ ...base, state: "decided", choice: 1 }), /你选了「留着」，已记录/);
   assert.ok(!said({ ...base, state: "decided", choice: 1 }).includes("callback"));
-  assert.match(said({ ...base, state: "done", choice: 0, result: "删了" }), /你选了「删」。已执行：删了/);
+  assert.match(said({ ...base, state: "done", choice: 0, result: "删了" }), /你选了「删」。处理结果：删了/);
   assert.match(said({ ...base, state: "decided", answer: "归档" }), /你选了「归档」/);
   assert.match(said({ ...base, state: "closed", result: "问题自己好了" }), /不用决定了：问题自己好了/);
   assert.match(said({ ...base, kind: "notice", state: "closed", options: [], result: "已处理" }), /已处理/);
@@ -276,4 +276,21 @@ test("GitHub: signed or not taken, and what it says becomes a plain event", () =
     (github({ headers: headers(odd, { "x-github-event": "push" }), body: odd, secret }) as any)[0].subject,
     /^a\/b-c$/,
   );
+});
+
+test("Feishu links safe web URLs while keeping finding text plain", () => {
+  const url = "http://git.local/group/app/-/merge_requests/80";
+  const card: Card = { ...base, text: `MR：${url}\n[P0] **data**` };
+  const elements = render(card).body.elements as any[];
+  const button = elements.find((x) => x.tag === "button");
+  assert.equal(button.behaviors[0].type, "open_url");
+  assert.equal(button.behaviors[0].default_url, url);
+  assert.equal(elements[0].text.tag, "plain_text");
+  for (const bad of [
+    "http://user:password@git.local/path",
+    "http://git.local/%0aevil",
+    "javascript:alert(1)",
+    "https://git.local/<evil>",
+  ])
+    assert.ok(!(render({ ...card, text: `MR：${bad}` }).body.elements as any[]).some((x) => x.tag === "button"));
 });

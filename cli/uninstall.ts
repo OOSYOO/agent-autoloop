@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { HOME } from "../host/home.ts";
 import { removeService, stopUp } from "../host/service.ts";
+import { isManagedLocalInstall, isManagedLocalWrapper } from "./local-install.ts";
 
 const ROOT = path.join(import.meta.dirname, "..");
 
@@ -17,6 +18,23 @@ function removeLink(link: string, target: string) {
   }
   rmSync(link);
   console.log(`删掉了 ${link}`);
+}
+
+function removeLocalWrapper() {
+  const app = path.join(HOME, "app");
+  if (
+    !existsSync(app) ||
+    realpathSync(app) !== realpathSync(ROOT) ||
+    !isManagedLocalInstall(app) ||
+    !isManagedLocalWrapper(HOME)
+  )
+    return;
+  const wrapper = path.join(HOME, "bin", "agent-autoloop");
+  const onPath = (process.env.PATH ?? "").split(path.delimiter).filter((place) => path.isAbsolute(place));
+  const places = [path.join(homedir(), ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", ...onPath];
+  for (const place of new Set(places)) removeLink(path.join(place, "agent-autoloop"), wrapper);
+  rmSync(wrapper);
+  console.log(`删掉了 ${wrapper}`);
 }
 
 function removeLinks() {
@@ -39,6 +57,7 @@ export async function uninstall(yes: boolean, ask: ((question: string) => Promis
   }
   removeService();
   stopUp();
+  removeLocalWrapper();
   removeLinks();
   const installedApp = path.join(HOME, "app");
   if (existsSync(installedApp) && realpathSync(installedApp) === realpathSync(ROOT)) {

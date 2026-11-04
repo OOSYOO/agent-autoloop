@@ -42,3 +42,12 @@ ACP 的授权依赖 Agent 遵守协议。桥接只按结构化工具种类、编
 门的权限、通道回答人和原消息、轮次 token 的范围、重复回执与卡片回答都有行为和一致性检查。`sim/invariants.ts` 是模拟与穷举共用的不变量；夜间检查另外对真实 SQLite 进程做 SIGKILL。范围是进程崩溃和有限场景，不等同于断电恢复证明或完整安全审计。
 
 `kernel/` 不读时钟、不取随机数。判断、事实追加和 `evolve` 更新投影在同一 WAL + FULL 事务里完成，提交后才应答。正常启动复用带游标和编号高水位的投影；格式指纹变化时从日志逐条重建，不改变旧事实。`agent-autoloop why 42` 查一轮的事件、规则和回执；`GET /v1/stream?after=42` 供本人客户端按序号续读。备份要一起保留 `hub.db` 和权限为 0600 的 `master.key`；后者推导轮次和卡片链接的 token。普通访问密钥只保存哈希；卡片链接查找索引也只保存 token 的哈希。
+
+GitLab Review 的配置、裸缓存、报告和写入意图应保存在本人私有目录。默认人工确认；显式信任的内网 HTTP 仅对配置中的精确 origin 生效。评论写入结果不明时先核查，不能自动盲目重发。详细配置见 [GitLab 审查配置](docs/gitlab-review.md)。
+
+GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](docs/gitlab-review.md)。
+
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 作为独立只读资料提供，不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
+
+
+GitLab 审查使用本人正常的 Codex 配置，保留原生 Skill、MCP 和工具，不额外覆盖权限或禁用工具。只读审查、不运行 MR 代码和不发布是任务要求，不是插件新建的隔离机制；实际工具权限仍由原生配置决定。Skill 名称出现在 prompt 或目录中不等于已执行。MR 中的 AGENTS、Skill、配置和代码均为资料，不提升为指令。审查依据变化会使旧缓存与批准失效；审计保存 prompt 和依据摘要，原生配置正文不落盘。共享审查工作树不承诺并行任务间的目录隔离。

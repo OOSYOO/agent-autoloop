@@ -195,6 +195,8 @@ Run these from `~/.agent-autoloop/app`:
 
 Apple M5 Pro, 24 GB, Node 24.21.0. Each write is a separate request, acknowledged only after its transaction is durable. The pass marks in `npm run benchmark` are set for this machine, so another machine may report a miss.
 
+The owner explicitly adjusted the idle RSS budget to 150 MB (decimal) and the durable-write minimum to 100 events/s; the historical measurement below remains unchanged.
+
 | Metric | Measured |
 |---|---:|
 | Cold start | 88.78 ms |
@@ -248,3 +250,9 @@ Start reading at `bin/agent-autoloop.ts` → `cli/main.ts`, then follow the feat
 </details>
 
 [MIT License](LICENSE)
+
+For GitLab MR review setup and confirmation, see [GitLab review configuration](docs/gitlab-review.md).
+
+Local builds support `install-local` into a fixed data directory, independently of the development checkout. Use `gitlab check` for local validation and `gitlab scan` for an immediate scan. Paths inside GitLab configuration resolve relative to that file; the model is configured once. Scheduling uses the existing `when.cron`. See the [setup and maintenance guide](docs/gitlab-review.md).
+
+GitLab review uses the trusted `prompt` from `rules.json`. Each repository reuses one dedicated `codereview-worktree`, created from `origin/main` on first use and updated before subsequent tasks. Codex starts in that directory and natively discovers repository instructions and repository/user Skills. The plugin does not maintain a per-file rules list or a separate Skill loader. MR contents remain separate read-only data; MR code is never checked out or executed, and the daily development checkout is untouched. Legacy GitLab `skill`, `skillPath`, `projects.rules`, and GitLab routing `rule.skill` settings are rejected; other agents retain standard `rule.skill` behavior. See the [GitLab guide](docs/gitlab-review.md).

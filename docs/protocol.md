@@ -348,13 +348,13 @@ Webhook 通道的 `config.json` 配置使用 `use: "webhook"`、`url` 和 `platf
 |---|---|
 | Node 运行时依赖 | 0 |
 | 冷启动到监听 | ≤150 ms |
-| 启动后空闲 1 秒 RSS | ≤60.4 MB；负载 RSS 单列观测 |
-| 逐条 HTTP 提交、落盘后应答 | ≥2000 条/秒 |
+| 启动后空闲 1 秒 RSS | ≤150 MB；负载 RSS 单列观测 |
+| 逐条 HTTP 提交、落盘后应答 | ≥100 条/秒 |
 | 事件到等待者领活 p99 | ≤10 ms |
 | 同时长轮询 | ≥1000 |
 | 模拟吞吐 | 记录耗时和步数，不设速度门槛 |
 
-这些是在 Apple M5 Pro 上的本地检查，不代表服务器容量。Node 24.21.0 的原基线也会超过 60 MB，空闲内存预算按实测峰值 60.394 MB 取到 60.4 MB；不通过改变采样时间或主动触发 GC 降低读数。最新实测、机器、完整复现命令在 README。日志只追加，不压缩，磁盘占用仍随历史增长。常驻内存不保存全部历史，待处理工作及返回结果仍会占用内存；统计总量仍需遍历数据库索引。没有总览页、工作流画布、Agent 记忆、模型路由、多租户或插件市场。
+这些是在 Apple M5 Pro 上的本地检查，不代表服务器容量。Node 24.21.0 的原基线实测峰值为 60.394 MB；本人已将空闲 RSS 预算调整为 150 MB（十进制），持久化写入门槛另经本人调整为 100 条/秒；这些预算调整不是性能优化；不通过改变采样时间或主动触发 GC 降低读数。最新实测、机器、完整复现命令在 README。日志只追加，不压缩，磁盘占用仍随历史增长。常驻内存不保存全部历史，待处理工作及返回结果仍会占用内存；统计总量仍需遍历数据库索引。没有总览页、工作流画布、Agent 记忆、模型路由、多租户或插件市场。
 
 ### 历史增长实测
 
@@ -397,3 +397,14 @@ Apple M5 Pro、24 GB、Node 24.21.0，用 `node scripts/history.ts 1000 10000 10
 Ship 使用本引擎仓库的 `plugins/delivery/action.yml`，项目固定到发布后的完整提交。Action 只输出 `release` 和 `superseded`，项目已有发布步骤根据输出运行。它与交付进程共用 `project.ts` 的范围与健康判断，不在项目里长期复制工具。
 
 普通健康 URL 只允许 HTTPS。测试时必须显式传 `--test-local-health`，Action 同样要 `test-local-health: 'true'`，才接受 `http://127.0.0.1`；不接受其他 HTTP 地址。GitHub 合并规则由项目维护者设置。
+
+GitLab Review 通过标准 gitlab Agent 插件、来源事件和卡片接续；私有配置、业务数据格式与发布约束见 [GitLab Review 方案](specs/local_agent_automation.md) 和 [配置指南](gitlab-review.md)，不改变上述通用协议。
+
+GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](gitlab-review.md)。
+
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 作为独立只读资料提供，不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](gitlab-review.md)。
+
+
+扫描、请求去重、报告缓存、卡片回答及每条评论发布前复核共用同一策略依据：实际 prompt、main 提交、原生有效配置和 Skill 目录/文件摘要，以及模型与项目发布条件。MR head 另行核对。运行中依据改变时不继续交付旧结果；旧格式报告和旧批准不复用，历史事实保留，不迁移数据库。审计保存实际 prompt、main/MR SHA、原生目录及文件摘要和模型输出；配置只保存摘要，避免泄露密钥。目录中存在 Skill 只表示可发现，不代表模型已经读取或执行了它。缺失、歧义或只读能力冲突应明确报告执行失败，不能冒充零 findings。
+
+GitLab 插件通过 Codex 原生配置读取和 Skill 目录接口取得审查依据，不调用模型进行扫描筛选。`gitlab check` 只检查本地配置、路由、程序和缓存，不联网，也不保证某个 Skill 已加载。审查按本人平时的 Codex 配置启动，保留原生 Skill、MCP 和工具配置，不额外增加工具禁用或权限覆盖。只读审查、不执行 MR 代码和不发布是本轮任务要求；实际能力由原生 Codex 配置决定。完整 main 仓库可读，MR 的规范变更仍只是待审资料。工作树由仓库复用，不提供每个 MR 的独立目录或运行期间不变的保证；插件不增加锁、队列或并发协调，调度仍由中台规则控制。

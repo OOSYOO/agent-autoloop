@@ -56,3 +56,20 @@ test("a commit reads the same whether its ref is a file or packed away, and a de
   if (before === undefined) delete process.env.AGENT_AUTOLOOP_COMMIT;
   else process.env.AGENT_AUTOLOOP_COMMIT = before;
 });
+
+test("local package version identifies its build rather than claiming a clean source commit", () => {
+  const installed = join(dir, "installed");
+  mkdirSync(installed);
+  writeFileSync(
+    join(installed, "local-install.json"),
+    JSON.stringify({
+      schema: 1,
+      kind: "agent-autoloop-local-install",
+      sourceCommit: "a".repeat(40),
+      sourceDirty: true,
+      contentSha256: "b".repeat(64),
+      installedAt: new Date().toISOString(),
+    }),
+  );
+  assert.equal(commitOf(installed), "local-bbbbbbbbbbbb");
+});

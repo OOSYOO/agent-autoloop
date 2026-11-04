@@ -10,14 +10,34 @@ import type { Card, ChannelContext } from "../../host/channels.ts";
 function outcomeOf(card: Card) {
   const chosen = card.choice === null ? card.answer : card.options[card.choice];
   if (card.state === "decided") return `你选了「${chosen}」，已记录，等待处理。`;
-  if (card.state === "done") return `你选了「${chosen}」。${card.result ? `已执行：${card.result}` : "已执行。"}`;
+  if (card.state === "done") return `你选了「${chosen}」。${card.result ? `处理结果：${card.result}` : "已处理。"}`;
   if (card.state === "closed" && card.kind === "ask") return `不用决定了：${card.result ?? ""}`;
   return card.state === "closed" && card.result ? card.result : null;
+}
+
+function safeWebLink(text: string): string | null {
+  const candidate = /https?:\/\/[^\s]+/i.exec(text)?.[0];
+  if (!candidate || /[<>"'`\\\x00-\x1f\x7f]/.test(candidate)) return null;
+  try {
+    const url = new URL(candidate);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      /[\x00-\x1f\x7f]/.test(decodeURIComponent(candidate))
+    )
+      return null;
+    return candidate;
+  } catch {
+    return null;
+  }
 }
 
 /** One card, as it looks now: the options while it's open, what became of it after. */
 export function render(card: Card) {
   const outcome = outcomeOf(card);
+  const link = safeWebLink(card.text);
   // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
   const option = (label: string, index: number) => ({
     tag: "interactive_container",
@@ -29,7 +49,8 @@ export function render(card: Card) {
     behaviors: [{ type: "callback", value: { card: card.id, choice: index } }],
     elements: [{ tag: "div", text: { tag: "plain_text", content: label } }],
   });
-  const afterwards = outcome ? [{ tag: "markdown", content: `**${outcome}**` }] : [];
+  const plain = (content: string) => ({ tag: "div", text: { tag: "plain_text", content } });
+  const afterwards = outcome ? [plain(outcome)] : [];
   return {
     schema: "2.0",
     config: { update_multi: true, enable_forward: false },
@@ -39,7 +60,17 @@ export function render(card: Card) {
     },
     body: {
       elements: [
-        ...(card.text ? [{ tag: "markdown", content: card.text }] : []),
+        ...(card.text ? [plain(card.text)] : []),
+        ...(link
+          ? [
+              {
+                tag: "button",
+                type: "default",
+                text: { tag: "plain_text", content: "打开链接" },
+                behaviors: [{ type: "open_url", default_url: link }],
+              },
+            ]
+          : []),
         ...(card.state === "open" ? card.options.map(option) : afterwards),
       ],
     },

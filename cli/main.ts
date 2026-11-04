@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { hubClient } from "../protocol/client.ts";
 import { CONFIG_FILE, readConfig, writeConfig, type Config } from "../host/config.ts";
 import { HOME, RULES_FILE } from "../host/home.ts";
-import { installService, removeService, serviceRunning } from "../host/service.ts";
+import { installService, removeService, serviceRunning, runningUp } from "../host/service.ts";
 import { versionLine } from "../host/version.ts";
 import { spendLine } from "./spend.ts";
 
@@ -42,6 +42,8 @@ const HELP = `Agent 自动化中台
   agent-autoloop mcp                      用标准输入输出连接 MCP 客户端
   agent-autoloop join <中台地址> --worker <名字> --key <密钥>
                                     另一台电脑只接活时用
+  agent-autoloop install-local           将当前代码安装到数据目录的 app 中
+  agent-autoloop gitlab check|scan         检查 GitLab 配置或立即扫描
   agent-autoloop update                  更新到最新版
   agent-autoloop uninstall [--yes]       卸载程序并保留数据；--yes 跳过确认
   agent-autoloop --version               版本和当前提交
@@ -514,6 +516,8 @@ function addPlugin(args: string[]) {
 }
 
 async function update() {
+  if (existsSync(path.join(ROOT, "local-install.json")))
+    return fail("这是本地安装包。请在新版源码目录运行 install-local，再从安装目录重启服务。");
   const pulled = spawnSync("git", ["-C", ROOT, "pull", "--ff-only"], { stdio: "inherit" });
   if (pulled.status !== 0) return fail("更新失败。");
   if (serviceRunning()) installService();
@@ -532,6 +536,13 @@ const commands: Record<string, () => unknown> = {
   mcp: async () => (await import("./mcp.ts")).mcp(),
   add: () => addPlugin(args),
   init: () => init(args),
+  gitlab: async () => (await import("./gitlab.ts")).gitlab(args),
+  "install-local": async () => {
+    if (runningUp() !== null) throw new Error("请先停止当前实例，再安装；安装不会中断正在进行的审查。");
+    const { installLocal } = await import("./local-install.ts");
+    const program = installLocal(ROOT, HOME);
+    console.log(`已安装：${program}。配置和数据保留在 ${HOME}。`);
+  },
   join: () => join(args),
   up: async () => (await import("../host/up.ts")).up(),
   try: tryIt,
