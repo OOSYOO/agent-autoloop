@@ -399,3 +399,8 @@ GitLab 实例的 Diff/CI 字段、Codex 参数支持和飞书权限仍需真实�
 部署整理：采用 `use: gitlab`，command 只含 scan/review、--config 和配置路径；模型/effort 从私有配置加载，显式重复配置必须一致。相对配置路径基于中台数据目录；配置内部路径基于配置所在目录；CLI 程序允许可信程序名。路径搬迁不改变策略摘要。安装产物在数据目录 app，运行时数据与其分离，Skill 使用 Codex 原生发现。HTTP 协议不变。
 
 GitLab 规则的 `prompt` 是任务指令来源；旧 GitLab `skill`、`skillPath`、`projects[].rules` 和 GitLab 的 `rule.skill` 必须移除。Codex 原生发现规则与 Skill，Worker Job 规则与当前可信规则不一致时拒绝。
+
+
+GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
+
+重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。

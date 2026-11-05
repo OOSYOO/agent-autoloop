@@ -160,3 +160,24 @@ test("a failed pre-POST freshness read releases the unsent claim", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a verified ordinary discussion without an inline position is sent once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "gitlab-ordinary-"));
+  try {
+    const item = { actionKey: "a".repeat(64), body: "text", position: null };
+    let posts = 0;
+    const io = {
+      current: async () => true,
+      find: async () => null,
+      post: async () => {
+        posts++;
+        return { discussionId: "d", noteId: 2, position: null };
+      },
+    };
+    assert.equal(await publishOne(root, "c".repeat(64), item, io), "sent");
+    assert.equal(await publishOne(root, "c".repeat(64), item, io), "sent");
+    assert.equal(posts, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

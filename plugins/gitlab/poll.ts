@@ -73,7 +73,7 @@ async function main() {
       const metadata = await verifyProjectRemote(gl, project);
       const rules = trustedRules(project);
       const instructions = loadInstructions(argv[1], project.id, HOME, RULES_FILE);
-      const native = await nativeBasis(config.codexPath, rules.worktree);
+      const native = await nativeBasis(config.codexPath, rules.worktree, instructions.prompt);
       const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
       if (mrUrl) {
         let iid: number;

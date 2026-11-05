@@ -127,3 +127,14 @@ test("legacy GitLab Skill settings are rejected with migration guidance", () => 
     );
   }
 });
+
+test("severity publication is explicit and changes the policy fingerprint", () => {
+  const base = input();
+  const manual = parseConfig(base);
+  const severity = parseConfig({ ...base, projects: [{ ...base.projects[0], publication: "severity" }] });
+  assert.equal(severity.projects[0].publication, "severity");
+  assert.notEqual(
+    policyHash(manual, manual.projects[0], "instructions"),
+    policyHash(severity, severity.projects[0], "instructions"),
+  );
+});

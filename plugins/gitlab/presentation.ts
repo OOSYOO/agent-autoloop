@@ -1,6 +1,9 @@
 import type { Finding } from "./report.ts";
 
-type Item = { body: string; position: { old_path?: string; new_path?: string; old_line?: number; new_line?: number } };
+type Item = {
+  body: string;
+  position: { old_path?: string; new_path?: string; old_line?: number; new_line?: number } | null;
+};
 export function findingsPages(
   url: string,
   sha: string,
@@ -12,15 +15,20 @@ export function findingsPages(
   items: Item[],
 ): string[] {
   const header = `MR ${projectId}/${mrIid}，版本 ${sha}，策略 ${policy}，\nMR：${url}\n版本：${sha}\n报告：${reportHash}\n`;
+  if (!findings.length) return [`${header}0 条 findings，请继续人工 review / 审核。`];
   const descriptions = findings
     .map((f, i) => {
       const body = `[${f.severity}] ${f.title}\n\n${f.evidence}\n\n影响：${f.impact}\n\n建议：${f.suggestion}`;
       const publishable = items.some(
         (item) =>
-          item.body === body &&
-          (f.side === "new"
-            ? item.position.new_path === f.path && item.position.new_line === f.line
-            : item.position.old_path === f.path && item.position.old_line === f.line),
+          (item.position === null &&
+            item.body ===
+              `[${f.severity}] ${f.title}\n\n位置：${f.path}（${f.side === "new" ? "新" : "旧"}版本${f.line === null ? "，无行号" : `第 ${f.line} 行`}）\n\n${f.evidence}\n\n影响：${f.impact}\n\n建议：${f.suggestion}`) ||
+          (item.body === body &&
+            item.position !== null &&
+            (f.side === "new"
+              ? item.position.new_path === f.path && item.position.new_line === f.line
+              : item.position.old_path === f.path && item.position.old_line === f.line)),
       );
       return `\n${i + 1}. ${publishable ? "将发布" : "不发布"}｜${f.path} ${f.side === "new" ? "新" : "旧"}版本${f.line === null ? "（无行号）" : `第 ${f.line} 行`}\n${body}\n`;
     })

@@ -71,7 +71,7 @@ async function inspect(program: string, cwd: string) {
   });
 }
 
-export async function nativeBasis(program: string, cwd: string) {
+export async function nativeBasis(program: string, cwd: string, prompt: string) {
   const result = await inspect(program, cwd),
     config = result.config;
   // The native catalog chooses Skills; file hashes only invalidate stale results.
@@ -79,6 +79,26 @@ export async function nativeBasis(program: string, cwd: string) {
     .filter((s: any) => s.enabled === true)
     .map((s: any) => ({ name: s.name, path: s.path, scope: s.scope, pluginId: s.pluginId ?? null }))
     .sort((a: any, b: any) => canonical(a).localeCompare(canonical(b), "en"));
+  // This selects invalidation evidence only; Codex still discovers and loads Skills natively.
+  const mentioned = skills.filter((skill) => {
+    const names = [skill.name, skill.name.split(":").at(-1)];
+    return names.some((name) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?<![a-zA-Z0-9_-])${escaped}(?![a-zA-Z0-9_-])`, "i").test(prompt);
+    });
+  });
+  const reviewConfig = Object.fromEntries(
+    [
+      "instructions",
+      "developer_instructions",
+      "model_instructions_file",
+      "project_doc_max_bytes",
+      "project_doc_fallback_filenames",
+      "project_root_markers",
+      "model_provider",
+    ].map((key) => [key, config[key] ?? null]),
+  );
+  reviewConfig.provider = config.model_providers?.[config.model_provider] ?? null;
   const fileHashes: { path: string; hash: string }[] = [];
   const seen = new Set<string>();
   const visit = async (path: string): Promise<void> => {
@@ -99,7 +119,7 @@ export async function nativeBasis(program: string, cwd: string) {
       fileHashes.push({ path, hash: `unreadable:${(error as NodeJS.ErrnoException).code ?? "unknown"}` });
     }
   };
-  for (const skill of skills) {
+  for (const skill of mentioned) {
     if (!["repo", "user", "system", "admin"].includes(skill.scope) || typeof skill.path !== "string")
       throw new Error("Skill 目录信息无效");
     await visit(dirname(skill.path));
@@ -112,6 +132,11 @@ export async function nativeBasis(program: string, cwd: string) {
     if (dirname(current) === current) break;
   }
   for (const file of globals) if (existsSync(file) && !file.startsWith(resolve(cwd) + "/")) await visit(file);
+  if (typeof config.model_instructions_file === "string") await visit(resolve(cwd, config.model_instructions_file));
   fileHashes.sort((a, b) => a.path.localeCompare(b.path, "en"));
-  return { digest: hash(canonical({ config, skills, errors: result.errors, fileHashes })), skills, files: fileHashes };
+  return {
+    digest: hash(canonical({ config: reviewConfig, skills: mentioned, fileHashes })),
+    skills,
+    files: fileHashes,
+  };
 }

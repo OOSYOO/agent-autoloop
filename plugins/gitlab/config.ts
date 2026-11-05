@@ -6,7 +6,7 @@ export type Project = {
   id: number;
   projectPath?: string;
   rulesBranch?: string;
-  publication: "manual" | "auto";
+  publication: "manual" | "auto" | "severity";
   ciMode: "required" | "confirmed-none" | "allow-skipped";
   cachePath: string;
 };
@@ -104,7 +104,7 @@ export function parseConfig(value: unknown, baseDir?: string): Config {
       !positive(p.id) ||
       ids.has(p.id) ||
       !path(p.cachePath) ||
-      ![undefined, "manual", "auto"].includes(p.publication) ||
+      ![undefined, "manual", "auto", "severity"].includes(p.publication) ||
       ![undefined, "required", "confirmed-none", "allow-skipped"].includes(p.ciMode)
     )
       throw new Error("项目配置无效");

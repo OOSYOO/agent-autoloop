@@ -9,7 +9,7 @@ import { eligible } from "./poll.ts";
 import { snapshot, fetchObjects, MissingObjectError } from "./snapshot.ts";
 import { runCodex } from "./codex.ts";
 import { parseModelReport } from "./report.ts";
-import { manifest } from "./manifest.ts";
+import { manifest, severityManifests } from "./manifest.ts";
 import { readRequests } from "./request.ts";
 import { trustedRules, verifyProjectRemote } from "./trusted-rules.ts";
 import { manualOverrides } from "./manual.ts";
@@ -96,7 +96,7 @@ async function main() {
   const gl = new GitLab(config.glabPath, config.instanceUrl);
   await verifyProjectRemote(gl, project);
   const trusted = trustedRules(project);
-  const native = await nativeBasis(config.codexPath, trusted.worktree);
+  const native = await nativeBasis(config.codexPath, trusted.worktree, instructions.prompt);
   const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
   const policy = policyHash(config, project, instructionsDigest, trusted.digest);
   const user = (await gl.get("user")) as { id: number };
@@ -236,7 +236,7 @@ async function main() {
   await verifyProjectRemote(new GitLab(latestConfig.glabPath, latestConfig.instanceUrl), latestProject);
   const latestInstructions = loadInstructions(args[1], latestProject.id, HOME, RULES_FILE);
   const latestMain = trustedRules(latestProject);
-  const latestNative = await nativeBasis(latestConfig.codexPath, latestMain.worktree);
+  const latestNative = await nativeBasis(latestConfig.codexPath, latestMain.worktree, latestInstructions.prompt);
   const latestInstructionsDigest = hash(canonical({ prompt: latestInstructions.prompt, native: latestNative.digest }));
   if (policyHash(latestConfig, latestProject, latestInstructionsDigest, latestMain.digest) !== policy)
     throw new Error("审查配置已经变化");
@@ -256,6 +256,79 @@ async function main() {
   if (Buffer.byteLength(canonical(report), "utf8") > 1024 * 1024) throw new Error("完整报告超过大小限制");
   const reportHash = saveArtifact(root, "reports", report);
   const refs = { base_sha: version.base_commit_sha, start_sha: version.start_commit_sha, head_sha: selected.headSha };
+  if (project.publication === "severity") {
+    const split = severityManifests(
+      config.instanceKey,
+      project.id,
+      selected.mrIid,
+      reportHash,
+      policy,
+      refs,
+      modelReport.findings,
+      version.diffs,
+    );
+    if (split.automatic.items.length) {
+      const autoHash = saveArtifact(root, "manifests", split.automatic);
+      const outcome = await resumeAutomatic(config, autoHash, args[1]);
+      if (outcome !== "sent") {
+        if (outcome === "stale") {
+          summary = "没事可做：版本已变化";
+          return;
+        }
+        throw new Error(outcome === "unknown" ? "评论发送结果不明，请本人在 GitLab 核查" : "自动发布未完成");
+      }
+    }
+    const visible = modelReport.findings.filter((finding) => finding.severity === "P2" || finding.severity === "P3");
+    if (!modelReport.findings.length || visible.length) {
+      const pages = findingsPages(
+        mrUrl,
+        selected.headSha,
+        reportHash,
+        project.id,
+        selected.mrIid,
+        policy,
+        visible,
+        split.manual.items,
+      );
+      if (split.manual.items.length) {
+        const manualHash = saveArtifact(root, "manifests", split.manual);
+        const saved = await resumeSaved(config, manualHash, args[1]);
+        if (saved === "unknown" || saved === "sent-stale") throw new Error("评论状态未确认，请本人在 GitLab 核查");
+        if (saved === "stale") {
+          summary = "没事可做：版本已变化";
+          return;
+        }
+        if (saved === "none") {
+          if (pages.length > 1)
+            pages.forEach((text, index) =>
+              notices.push({
+                key: `findings:${reportHash}:${index}`,
+                title: `审查 findings ${index + 1}/${pages.length}`,
+                text,
+              }),
+            );
+          ask(
+            `publish:${manualHash}`,
+            "确认发布审查评论",
+            pages.length === 1
+              ? pages[0]
+              : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${policy}，\nMR：${mrUrl}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
+            { schema: 1, kind: "publish", manifestHash: manualHash },
+            ["发布这份报告中的评论", "不发布"],
+          );
+        }
+      } else
+        pages.forEach((text, index) =>
+          notices.push({
+            key: `findings:${reportHash}:${index}`,
+            title: `审查 findings ${index + 1}/${pages.length}`,
+            text,
+          }),
+        );
+    }
+    summary = modelReport.findings.length ? "审查完成" : "0 条 findings，请继续人工 review / 审核";
+    return;
+  }
   const value = manifest(
     config.instanceKey,
     project.id,

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { atomicFile, claimAction, canonical } from "./storage.ts";
 import { GitLabWriteError } from "./api.ts";
-type Item = { actionKey: string; body: string; position: { head_sha: string } };
+type Item = { actionKey: string; body: string; position: { head_sha: string } | null };
 type Remote = { discussionId: string; noteId: number; position: unknown };
 type IO = {
   current: () => Promise<boolean>;
@@ -15,7 +15,6 @@ function valid(result: Remote, item: Item): boolean {
     !!result.discussionId &&
     Number.isSafeInteger(result.noteId) &&
     result.noteId > 0 &&
-    !!result.position &&
     canonical(result.position) === canonical(item.position)
   );
 }

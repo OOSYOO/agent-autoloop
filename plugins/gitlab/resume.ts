@@ -95,7 +95,7 @@ async function publishManifest(
   const gl = new GitLab(config.glabPath, config.instanceUrl);
   await verifyProjectRemote(gl, project);
   const trusted = trustedRules(project);
-  const native = await nativeBasis(config.codexPath, trusted.worktree);
+  const native = await nativeBasis(config.codexPath, trusted.worktree, instructions.prompt);
   const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
   if (
     report.instructionsDigest !== instructionsDigest ||
@@ -109,13 +109,22 @@ async function publishManifest(
       JSON.stringify({ schema: 1, manifestHash, cardId: answer.card, choice, by: answer.by, at: answer.at }),
       true,
     );
-  else if (!saved && project.publication !== "auto") throw new Error("未获发布授权");
+  else if (
+    !saved &&
+    project.publication !== "auto" &&
+    !(project.publication === "severity" && man.mode === "severity-auto")
+  )
+    throw new Error("未获发布授权");
+  if (project.publication === "severity" && !["severity-auto", "severity-manual"].includes(man.mode)) return "stale";
+  if (project.publication === "severity" && man.mode === "severity-auto" && answer)
+    throw new Error("自动发布清单不能由人工批准");
   const user = (await gl.get("user")) as any;
   if (user?.id !== config.reviewerId) throw new Error("GitLab 登录身份与配置不符");
   const path = `projects/${project.id}/merge_requests/${report.mrIid}`;
   if (
     !answer &&
     !saved &&
+    project.publication !== "severity" &&
     requiresComparison(await gl.list(`${path}/discussions?per_page=100`), config.reviewerId, report.headSha)
   )
     return "comparison";
@@ -131,7 +140,7 @@ async function publishManifest(
     await verifyProjectRemote(currentGl, currentProject);
     const currentInstructions = loadInstructions(configFile, currentProject.id, HOME, RULES_FILE);
     const currentMain = trustedRules(currentProject);
-    const currentNative = await nativeBasis(latest.codexPath, currentMain.worktree);
+    const currentNative = await nativeBasis(latest.codexPath, currentMain.worktree, currentInstructions.prompt);
     const currentInstructionsDigest = hash(
       canonical({ prompt: currentInstructions.prompt, native: currentNative.digest }),
     );
@@ -182,10 +191,24 @@ async function publishManifest(
     throw new Error("Diff 不完整");
   const refs = { base_sha: report.baseSha, start_sha: report.startSha, head_sha: report.headSha };
   for (const item of man.items) {
-    if (!item || typeof item.body !== "string" || !item.position || typeof item.actionKey !== "string")
+    if (
+      !item ||
+      typeof item.body !== "string" ||
+      (item.position === null && project.publication !== "severity") ||
+      typeof item.actionKey !== "string"
+    )
       throw new Error("待发布内容无效");
-    const p = item.position,
-      side = p.new_line !== undefined ? "new" : "old",
+    const p = item.position;
+    if (p === null) {
+      if (
+        hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, null])) !==
+        item.actionKey
+      )
+        throw new Error("评论内容已变化");
+      continue;
+    }
+    if (!p || typeof p !== "object") throw new Error("评论位置无效");
+    const side = p.new_line !== undefined ? "new" : "old",
       line = side === "new" ? p.new_line : p.old_line,
       path = side === "new" ? p.new_path : p.old_path;
     const position = positionFor(version.diffs, refs, path, side, line);
@@ -204,8 +227,16 @@ async function publishManifest(
         const discussions = await gl.list(`${path}/discussions?per_page=100`);
         for (const discussion of discussions as any[])
           for (const note of discussion.notes ?? []) {
-            if (note.author?.id !== config.reviewerId || note.body !== body || !note.position) continue;
-            const position = Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
+            if (
+              note.author?.id !== config.reviewerId ||
+              note.body !== body ||
+              (item.position === null ? note.position != null : !note.position)
+            )
+              continue;
+            const position =
+              item.position === null
+                ? null
+                : Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
             if (
               canonical(position) === canonical(item.position) &&
               typeof discussion.id === "string" &&
@@ -216,10 +247,17 @@ async function publishManifest(
         return null;
       },
       post: async () => {
-        const result = (await gl.post(`${path}/discussions`, { body, position: item.position })) as any;
+        const result = (await gl.post(
+          `${path}/discussions`,
+          item.position === null ? { body } : { body, position: item.position },
+        )) as any;
         const note = result?.notes?.[0];
         const position =
-          note?.position && Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
+          item.position === null
+            ? note?.position == null
+              ? null
+              : note.position
+            : note?.position && Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
         return { discussionId: result?.id, noteId: note?.id, position };
       },
     });

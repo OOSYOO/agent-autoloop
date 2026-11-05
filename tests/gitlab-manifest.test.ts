@@ -33,3 +33,19 @@ test("manifest binds content and position, excluding P3 and missing positions", 
       .actionKey,
   );
 });
+
+test("severity policy separates automatic and manual findings and retains unpositioned findings", async () => {
+  const { severityManifests } = await import("../plugins/gitlab/manifest.ts");
+  const p0 = { ...finding, severity: "P0" as const };
+  const p2 = { ...finding, severity: "P2" as const, title: "manual" };
+  const args = ["work", 42, 7, "d".repeat(64), "e".repeat(64), refs] as const;
+  const diff = [{ old_path: "a.ts", new_path: "a.ts", diff: "@@ -0,0 +1 @@\n+line\n" }];
+  const result = severityManifests(...args, [p0, p2], diff);
+  assert.equal(result.automatic.items.length, 1);
+  assert.match(result.automatic.items[0].body, /^\[P0\]/);
+  assert.equal(result.manual.items.length, 1);
+  assert.match(result.manual.items[0].body, /^\[P2\]/);
+  const fallback = severityManifests(...args, [{ ...p0, line: null }], diff).automatic.items[0];
+  assert.equal(fallback.position, null);
+  assert.match(fallback.body, /a.ts/);
+});

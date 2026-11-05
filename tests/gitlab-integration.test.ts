@@ -125,7 +125,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     };
     const config = parseConfig(raw),
       main = trustedRules(config.projects[0]),
-      catalog = await nativeBasis(codex, main.worktree),
+      catalog = await nativeBasis(codex, main.worktree, "使用alpha详细审查"),
       policy = policyHash(
         config,
         config.projects[0],
@@ -614,7 +614,8 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         hash(
           canonical({
             prompt: "使用alpha详细审查",
-            native: (await nativeBasis(codex, trustedRules(autoConfig.projects[0]).worktree)).digest,
+            native: (await nativeBasis(codex, trustedRules(autoConfig.projects[0]).worktree, "使用alpha详细审查"))
+              .digest,
           }),
         ),
         trustedRules(autoConfig.projects[0]).digest,
@@ -849,6 +850,165 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       4,
       "only first of two items may post",
     );
+    const severityRaw = { ...raw, projects: [{ ...raw.projects[0], publication: "severity" }] };
+    writeFileSync(file, JSON.stringify(severityRaw));
+    const severityConfig = parseConfig(severityRaw);
+    const severityTrusted = trustedRules(severityConfig.projects[0]);
+    const severityNative = await nativeBasis(codex, severityTrusted.worktree, "使用alpha详细审查");
+    const severityPolicy = policyHash(
+      severityConfig,
+      severityConfig.projects[0],
+      hash(canonical({ prompt: "使用alpha详细审查", native: severityNative.digest })),
+      severityTrusted.digest,
+    );
+    let observation = 20;
+    for (const scenario of ["zero", "critical", "mixed", "ordinary", "p3"] as const) {
+      const scenarioHead = tree(blob(`${scenario}\n`));
+      const scenarioRequest = {
+        ...req,
+        requestId: observation.toString(16).padStart(64, "0"),
+        headSha: scenarioHead,
+        policyHash: severityPolicy,
+        observation: observation++,
+      };
+      saveRequest(join(root, "gitlab"), {
+        ...scenarioRequest,
+        schema: 1 as const,
+        origin: "auto" as const,
+        instanceKey: "work",
+        eligible: true,
+      });
+      writeFileSync(
+        mrFile,
+        JSON.stringify({
+          ...mr,
+          sha: scenarioHead,
+          head_pipeline: { sha: scenarioHead, status: "success" },
+          diff_refs: { ...refs, head_sha: scenarioHead },
+        }),
+      );
+      writeFileSync(
+        versionFile,
+        JSON.stringify({
+          ...version,
+          head_commit_sha: scenarioHead,
+          diffs: [{ old_path: "a.txt", new_path: "a.txt", diff: `@@ -1 +1 @@\n-old\n+${scenario}\n` }],
+        }),
+      );
+      const p0 = {
+        ...report.findings[0],
+        severity: "P0",
+        title: `严重-${scenario}`,
+        line: scenario === "ordinary" ? null : 1,
+      };
+      const p2 = { ...report.findings[0], title: `普通-${scenario}` };
+      writeFileSync(
+        reportFile,
+        JSON.stringify({
+          ...report,
+          findings:
+            scenario === "zero"
+              ? []
+              : scenario === "mixed"
+                ? [p0, p2]
+                : scenario === "p3"
+                  ? [{ ...p2, severity: "P3" }]
+                  : [p0],
+        }),
+      );
+      writeFileSync(
+        context,
+        JSON.stringify({
+          events: [
+            {
+              id: `gitlab:${scenarioRequest.requestId}`,
+              source: "gitlab",
+              type: "mr.review.42",
+              subject: "work/42/7",
+              detail: JSON.stringify(scenarioRequest),
+            },
+          ],
+          answers: [],
+        }),
+      );
+      const beforePosts = readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length;
+      const execution = spawnSync(
+        process.execPath,
+        [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: root,
+            AGENT_AUTOLOOP_HOME: root,
+            AGENT_AUTOLOOP_CONTEXT: context,
+            AGENT_AUTOLOOP_RUN: String(observation),
+            TEST_OLD: "1",
+          },
+        },
+      );
+      assert.equal(execution.status, 0, execution.stderr);
+      const parsed = resultFrom(readMessage(execution.stdout), {}).result;
+      const afterPosts = readFileSync(join(root, "posts.log"), "utf8").trim().split("\n");
+      assert.equal(afterPosts.length - beforePosts, scenario === "zero" || scenario === "p3" ? 0 : 1);
+      if (scenario === "zero") assert.match(parsed.notice?.[0].text ?? "", /人工/);
+      if (scenario === "p3") {
+        assert.match(parsed.notice?.[0].text ?? "", /P3/);
+        assert.equal(parsed.ask?.length ?? 0, 0);
+      }
+      if (scenario === "critical" || scenario === "ordinary") {
+        assert.equal(parsed.ask?.length ?? 0, 0);
+        assert.equal(parsed.notice?.length ?? 0, 0);
+      }
+      if (scenario === "ordinary") assert.equal(JSON.parse(afterPosts.at(-1)!).position, undefined);
+      if (scenario === "mixed") {
+        assert.equal(parsed.ask?.length, 1);
+        const onlyP2 = loadArtifact(
+          join(root, "gitlab"),
+          "manifests",
+          JSON.parse(parsed.ask![0].about!).manifestHash,
+        ) as any;
+        assert.equal(onlyP2.items.length, 1);
+        assert.match(onlyP2.items[0].body, /^\[P2\]/);
+        assert.doesNotMatch(parsed.ask![0].text, /严重-mixed/);
+        writeFileSync(
+          context,
+          JSON.stringify({
+            events: [],
+            answers: [
+              {
+                card: 300,
+                title: parsed.ask![0].title,
+                options: parsed.ask![0].options,
+                choice: 0,
+                text: null,
+                about: parsed.ask![0].about,
+                by: null,
+                at: "2026-01-01T00:00:00Z",
+              },
+            ],
+          }),
+        );
+        const approved = spawnSync(
+          process.execPath,
+          [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              HOME: root,
+              AGENT_AUTOLOOP_HOME: root,
+              AGENT_AUTOLOOP_CONTEXT: context,
+              AGENT_AUTOLOOP_RUN: "40",
+            },
+          },
+        );
+        assert.equal(approved.status, 0, approved.stderr);
+        const approvedPosts = readFileSync(join(root, "posts.log"), "utf8").trim().split("\n");
+        assert.equal(approvedPosts.length, afterPosts.length + 1);
+        assert.match(JSON.parse(approvedPosts.at(-1)!).body, /^\[P2\]/);
+      }
+    }
   } finally {
     if (server) {
       server.closeAllConnections();
