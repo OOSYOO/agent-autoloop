@@ -1,4 +1,4 @@
-import { eligible } from "./poll.ts";
+import { eligible } from "./ci.ts";
 import { nextObservation } from "./request.ts";
 type Config = { instanceKey: string; instanceUrl: string; reviewerId: number };
 type Project = Pick<import("./config.ts").Project, "id" | "ciMode">;
@@ -10,6 +10,7 @@ type Record = ReturnType<typeof nextObservation> & {
 };
 type IO = {
   retryUnrouted?: boolean;
+  eligible?: (mr: any) => Promise<boolean>;
   list: () => Promise<any[]>;
   read: (iid: number) => Record | undefined;
   write: (record: Record) => void;
@@ -33,7 +34,7 @@ export async function scanProject(
       mrIid: mr.iid,
       headSha: mr.sha,
       policyHash,
-      eligible: eligible(mr, config.reviewerId, project.ciMode, []),
+      eligible: io.eligible ? await io.eligible(mr) : eligible(mr, config.reviewerId, project.ciMode, []),
     };
     let next = nextObservation(before, value);
     const reusableManual =

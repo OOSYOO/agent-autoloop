@@ -198,3 +198,45 @@ test("reviewer removal then reassignment at the same SHA produces a new request"
   assert.notEqual(posted[0].id, posted[1].id);
   assert.equal(records.at(-1).observation, 3);
 });
+
+test("automatic checks use the shared live gate and never fall back to parent success", async () => {
+  const { eligibleForReview } = await import("../plugins/gitlab/ci.ts");
+  const mr = {
+    iid: 7,
+    state: "opened",
+    draft: false,
+    sha,
+    reviewers: [{ id: 8 }],
+    head_pipeline: { id: 10, sha, status: "canceled" },
+  };
+  const project = { id: 42, ciMode: "checks" as const, ciJobs: ["host"] };
+  const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 };
+  const posted: object[] = [],
+    records: any[] = [];
+  let status = "success";
+  const gl = {
+    get: async () => mr,
+    list: async () => [{ id: 1, name: "host", status, commit: { id: sha }, pipeline: { id: 10 } }],
+  };
+  const io = {
+    list: async () => [mr],
+    read: () => records.at(-1),
+    write: (record: any) => {
+      records.push(record);
+    },
+    eligible: (current: any) => eligibleForReview(gl, project, current, 8, []),
+    post: async (event: object) => {
+      posted.push(event);
+      return { event: 1, duplicate: false, routed: ["review"] };
+    },
+  };
+  await scanProject(config, project, "team/project", policy, io);
+  assert.equal(posted.length, 1);
+  status = "failed";
+  await scanProject(config, project, "team/project", policy, io);
+  assert.equal(records.at(-1).eligible, false);
+  assert.equal(posted.length, 1);
+  mr.head_pipeline.status = "success";
+  await scanProject(config, project, "team/project", policy, { ...io, eligible: undefined });
+  assert.equal(records.at(-1).eligible, false, "checks cannot use the legacy synchronous predicate");
+});

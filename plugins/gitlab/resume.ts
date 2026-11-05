@@ -10,7 +10,7 @@ import { GitLab } from "./api.ts";
 import { readRequests } from "./request.ts";
 import { trustedRules, verifyProjectRemote } from "./trusted-rules.ts";
 import { manualOverrides } from "./manual.ts";
-import { eligible } from "./poll.ts";
+import { eligibleForReview } from "./ci.ts";
 import { positionFor } from "./diff.ts";
 import { requiresComparison } from "./auto.ts";
 import { publishOne } from "./publish.ts";
@@ -149,9 +149,9 @@ async function publishManifest(
       policyHash(latest, currentProject, currentInstructionsDigest, currentMain.digest) !== man.policyHash
     )
       return false;
-    const mr = (await gl.get(path)) as any;
+    const mr = (await currentGl.get(path)) as any;
     return (
-      eligible(mr, config.reviewerId, project.ciMode, overrides) &&
+      (await eligibleForReview(currentGl, currentProject, mr, latest.reviewerId, overrides)) &&
       mr.sha === report.headSha &&
       mr.diff_refs?.head_sha === report.headSha &&
       mr.diff_refs?.base_sha === report.baseSha &&

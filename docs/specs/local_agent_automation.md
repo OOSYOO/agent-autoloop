@@ -44,7 +44,7 @@ flowchart TB
         subgraph EXT["我们维护 / plugins/gitlab"]
             P["poll.ts / GitLab 采集与准入"]
             R["run.ts / 单个 MR 审查与发布"]
-            D[("私有工作目录 / 快照、报告、发布意图")]
+            D[("私有工作目录 / Git 对象、报告、发布意图")]
         end
         X["原生 Codex CLI / 只读分析"]
     end
@@ -58,9 +58,9 @@ flowchart TB
     P -->|"读取 MR、身份、CI"| GL
     P -->|"POST /v1/events"| H
     R -->|"读取版本与 Diff；受控发布 Discussion"| GL
-    R -->|"准备文字快照；保存报告和意图"| D
+    R -->|"准备 Git 对象；保存报告和意图"| D
     R -->|"codex exec / 指定模型"| X
-    X -->|"只读快照；输出 Findings"| D
+    X -->|"读取固定 SHA 对象；输出 Findings"| D
     R -->|"done / ask / notice 回执"| W
     CH -->|"cards/next、delivered、answer"| H
     CH -->|"lark-cli / bot 私聊"| FS
@@ -74,13 +74,13 @@ flowchart TB
 | 组件 | 责任 | 不承担的责任 |
 |---|---|---|
 | poll.ts | 分页读取授权项目，确定 Reviewer/Draft/CI，发稳定 ID 的来源事件 | 不调用模型，不改代码，不发布评论 |
-| run.ts | 核对 MR 版本，准备快照，运行 Codex，校验结果，生成 ask，校验回答，发布合格评论 | 不自建队列、Worker、并发槽位或失败计数 |
+| run.ts | 核对 MR 版本，准备 Git 对象，运行 Codex，校验结果，生成 ask，校验回答，发布合格评论 | 不自建队列、Worker、并发槽位或失败计数 |
 | 私有工作目录 | 保存报告原文、确定的待发布文本、版本绑定和写入意图，供同机恢复 | 不保存另一套运行状态机，不替代上游事实日志 |
 | Codex CLI | 基于可信 Skill 与代码资料产出 Findings | 不持有 GitLab 写入身份，不决定授权，不自行调用发布 API |
 | 上游 Hub / Worker | 事项、路由、执行、重试、回答、停止与重连 | 不理解 GitLab 或严重度，不做语义问题关联 |
 | 上游飞书通道 | 现成卡片、本人回答验证与消息更新 | 不新增产品面板 |
 
-使用现有 `use: command` 启动脚本；不需要新增插件发现方式。业务代码只用 Node 自带模块及自身目录文件。原生 Codex 参数和快照处理以 [普通适配器](../../plugins/codex/agent.ts) 与 [现有审查实现](../../plugins/delivery/review.ts) 为参考，不启用 GitHub 合并发布流程。
+使用现有 `use: command` 启动脚本；不需要新增插件发现方式。业务代码只用 Node 自带模块及自身目录文件。原生 Codex 调用见 [GitLab 调用器](../../plugins/gitlab/codex.ts)，固定 SHA 的对象准备见 [对象入口](../../plugins/gitlab/objects.ts)，不启用 GitHub 合并发布流程。
 
 采用上游飞书通道前必须确认同一应用没有其他卡片监听占用；这是现有通道的运行约束，不另写一套回调系统来绕过。
 
@@ -123,7 +123,7 @@ sequenceDiagram
     H-->>W: Job（规则与 context）
     W->>R: command argv；AGENT_AUTOLOOP_CONTEXT
     R->>G: 重新核对 Head，读取 Diff 与代码对象
-    R->>R: 准备只读文字快照
+    R->>R: 准备固定 SHA Git 对象，不检出 MR
     R->>X: codex exec（指定模型、可信 Skill）
     X-->>R: Findings
     R->>R: 校验并持久化报告与待发布内容
@@ -374,7 +374,7 @@ GitLab 没有与本地文件事务联动的“当前 Head 等于预期才创建 
 |---|---|---|---|
 | 上游协议与 Mac 状态恢复（SYS-01/07/09） | L1 | 已有 tests/conformance.test.ts | 既有接口、鉴权、重放通过 |
 | 准入、分页与规则（SYS-02/03、GL-01/02/03/05） | L2 | tests/gitlab-poll.test.ts | Reviewer、Draft、当前 CI、允许 skipped 和无 CI 配置均正确；多页无遗漏、无重复派单 |
-| Codex 调用与快照（SYS-04/05、GL-06/07/08） | L2 | `tests/gitlab-codex.test.ts`、`tests/gitlab-snapshot.test.ts`、`tests/gitlab-integration.test.ts` | 假 Codex 验证原生参数、精确 SHA、文字资料及完整结果；不调用真实模型 |
+| Codex 调用与 Git 对象（SYS-04/05、GL-06/07/08） | L2 | `tests/gitlab-codex.test.ts`、`tests/gitlab-objects.test.ts`、`tests/gitlab-integration.test.ts` | 假 Codex 验证原生参数、精确 SHA、直接读取 Git 对象及完整结果；不调用真实模型 |
 | 人工回答接续（SYS-08、PUB-02/07/09） | L1 | tests/gitlab-review.test.ts | answers-only 可恢复；旧 SHA/变更内容/自由文本不授权 |
 | 同版本发布去重（PUB-01/04/08/10） | L2 | tests/gitlab-publish.test.ts | 超时/崩溃先核查，同条评论不盲重发；P3 不发 |
 | 当前版本与 Diff 位置（PUB-03） | L2 | 同上，假 GitLab 并发变更 | 合法坐标才发布；过期不发；竞争窗口已发旧版本如实标记 |
@@ -392,7 +392,7 @@ GitLab 没有与本地文件事务联动的“当前 Head 等于预期才创建 
 
 Mac 需具备 Node 24+、已登录的 Codex CLI、可读取目标 GitLab 并以本人身份评论的 glab、现成 lark-cli。实际项目、身份、模型及飞书收件人由私有配置提供；配置和凭据不提交到 Fork。
 
-GitLab 实例的 Diff/CI 字段、Codex 参数支持和飞书权限仍需真实验证。参数不受支持、快照只读失败或身份不符时停止业务执行并报告，不静默放宽权限。源码与文档核对不等于这些运行验收已经通过。
+GitLab 实例的 Diff/CI 字段、Codex 参数支持和飞书权限仍需真实验证。参数不受支持、对象读取失败或身份不符时停止业务执行并报告，不静默放宽权限。源码与文档核对不等于这些运行验收已经通过。
 
 真实 GitLab 和飞书写入只对本人明确授权的测试对象执行。
 

@@ -1,31 +1,9 @@
-import type { Project } from "./config.ts";
-
 export function discoveryPath(projectId: number): string {
   if (!Number.isSafeInteger(projectId) || projectId <= 0) throw new Error("项目编号无效");
   return `projects/${projectId}/merge_requests?state=opened&per_page=100`;
 }
-type Override = "reviewer" | "draft" | "ci";
-
-export function eligible(mr: any, reviewerId: number, ciMode: Project["ciMode"], overrides: Override[]): boolean {
-  if (
-    !mr ||
-    mr.state !== "opened" ||
-    typeof mr.draft !== "boolean" ||
-    !/^[a-f0-9]{40}$/.test(mr.sha) ||
-    !Array.isArray(mr.reviewers) ||
-    !("head_pipeline" in mr)
-  )
-    return false;
-  if (mr.draft && !overrides.includes("draft")) return false;
-  if (!mr.reviewers.some((r: any) => r?.id === reviewerId) && !overrides.includes("reviewer")) return false;
-  if (!overrides.includes("ci")) {
-    if (mr.head_pipeline === null) return ciMode === "confirmed-none";
-    if (!mr.head_pipeline || mr.head_pipeline.sha !== mr.sha) return false;
-    if (mr.head_pipeline.status !== "success" && !(ciMode === "allow-skipped" && mr.head_pipeline.status === "skipped"))
-      return false;
-  }
-  return true;
-}
+export { eligible } from "./ci.ts";
+import { eligibleForReview, type Override } from "./ci.ts";
 
 async function main() {
   const { readFileSync, existsSync } = await import("node:fs");
@@ -84,7 +62,8 @@ async function main() {
         }
         foundManual = true;
         const mr = (await gl.get(`projects/${project.id}/merge_requests/${iid}`)) as any;
-        if (!eligible(mr, config.reviewerId, project.ciMode, overrides)) throw new Error("MR 未满足审查条件");
+        if (!(await eligibleForReview(gl, project, mr, config.reviewerId, overrides)))
+          throw new Error("MR 未满足审查条件");
         const digest = policyHash(config, project, instructionsDigest, rules.digest);
         const file = join(config.dataRoot, "gitlab", "requests", `${project.id}`, `${iid}.json`);
         const previous = latestRequest(join(config.dataRoot, "gitlab"), project.id, iid);
@@ -168,6 +147,7 @@ async function main() {
       const directory = join(config.dataRoot, "gitlab", "requests", `${project.id}`);
       await scanProject(config, project, metadata.path_with_namespace, digest, {
         retryUnrouted,
+        eligible: (mr) => eligibleForReview(gl, project, mr, config.reviewerId, []),
         list: async () => mrs,
         read: (iid) => latestRequest(join(config.dataRoot, "gitlab"), project.id, iid),
         write: (record) => saveRequest(join(config.dataRoot, "gitlab"), record),
