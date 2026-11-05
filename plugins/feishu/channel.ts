@@ -37,7 +37,6 @@ function safeWebLink(text: string): string | null {
 /** One card, as it looks now: the options while it's open, what became of it after. */
 export function render(card: Card) {
   const outcome = outcomeOf(card);
-  const link = safeWebLink(card.text);
   // Each option is a block across the card, its words wrapping: buttons in a row, one line high, cut long options off.
   const option = (label: string, index: number) => ({
     tag: "interactive_container",
@@ -50,6 +49,21 @@ export function render(card: Card) {
     elements: [{ tag: "div", text: { tag: "plain_text", content: label } }],
   });
   const plain = (content: string) => ({ tag: "div", text: { tag: "plain_text", content } });
+  const linkedText = (text: string) => {
+    const elements: (ReturnType<typeof plain> | { tag: string; content: string })[] = [];
+    let cursor = 0;
+    for (const match of text.matchAll(/https?:\/\/[^\s]+/gi)) {
+      const link = safeWebLink(match[0]);
+      if (!link) continue;
+      if (match.index > cursor) elements.push(plain(text.slice(cursor, match.index)));
+      const label = link.replace(/[\\[\]()*_]/g, "\\$&");
+      const target = link.replace(/[()[\]]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+      elements.push({ tag: "markdown", content: `[${label}](${target})` });
+      cursor = match.index + link.length;
+    }
+    if (cursor < text.length) elements.push(plain(text.slice(cursor)));
+    return elements;
+  };
   const afterwards = outcome ? [plain(outcome)] : [];
   return {
     schema: "2.0",
@@ -59,20 +73,7 @@ export function render(card: Card) {
       template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
     },
     body: {
-      elements: [
-        ...(card.text ? [plain(card.text)] : []),
-        ...(link
-          ? [
-              {
-                tag: "button",
-                type: "default",
-                text: { tag: "plain_text", content: "打开链接" },
-                behaviors: [{ type: "open_url", default_url: link }],
-              },
-            ]
-          : []),
-        ...(card.state === "open" ? card.options.map(option) : afterwards),
-      ],
+      elements: [...linkedText(card.text), ...(card.state === "open" ? card.options.map(option) : afterwards)],
     },
   };
 }

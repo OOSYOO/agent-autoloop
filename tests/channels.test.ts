@@ -278,19 +278,27 @@ test("GitHub: signed or not taken, and what it says becomes a plain event", () =
   );
 });
 
-test("Feishu links safe web URLs while keeping finding text plain", () => {
+test("Feishu card URLs are clickable while finding text remains plain", () => {
   const url = "http://git.local/group/app/-/merge_requests/80";
-  const card: Card = { ...base, text: `MR：${url}\n[P0] **data**` };
+  const card: Card = {
+    ...base,
+    text: `MR：${url}\n[P0] **data** <at id=all>all</at>\n另一个：https://git.local/mr/100`,
+  };
   const elements = render(card).body.elements as any[];
-  const button = elements.find((x) => x.tag === "button");
-  assert.equal(button.behaviors[0].type, "open_url");
-  assert.equal(button.behaviors[0].default_url, url);
-  assert.equal(elements[0].text.tag, "plain_text");
+  const links = elements.filter((x) => x.tag === "markdown");
+  assert.equal(links.length, 2);
+  assert.equal(links[0].content, `[${url.replaceAll("_", "\\_")}](${url})`);
+  assert.ok(
+    elements.some((x) => x.text?.tag === "plain_text" && x.text.content.includes("**data** <at id=all>all</at>")),
+  );
+  assert.ok(!elements.some((x) => x.tag === "button"));
+  const special = render({ ...base, text: "https://git.local/a_(b)[c]" }).body.elements as any[];
+  assert.ok(special.find((x) => x.tag === "markdown").content.endsWith("(https://git.local/a_%28b%29%5Bc%5D)"));
   for (const bad of [
     "http://user:password@git.local/path",
     "http://git.local/%0aevil",
     "javascript:alert(1)",
     "https://git.local/<evil>",
   ])
-    assert.ok(!(render({ ...card, text: `MR：${bad}` }).body.elements as any[]).some((x) => x.tag === "button"));
+    assert.ok(!(render({ ...card, text: `MR：${bad}` }).body.elements as any[]).some((x) => x.tag === "markdown"));
 });
