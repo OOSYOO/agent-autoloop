@@ -14,9 +14,10 @@
 // A failed or timed-out receipt repair must preserve the original business outcome; cancellation must reap a child
 // ignoring SIGTERM even after restart; adding usage must not turn a missing price into a reported zero.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { setup } from "./helpers.ts";
 
@@ -552,4 +553,203 @@ test("the hub gone for ten minutes is told once, tried a few times if telling fa
   clock += 11 * 60_000;
   for (let i = 0; i < 8; i++) await f.tick();
   assert.equal(readFileSync(attempts, "utf8").trim().split("\n").length, 5);
+});
+
+// Separate processes must recover a remote receipt after a Hub outage without rerunning the business,
+// and route an answers-only turn back to the same remote report directory.
+test("separate Hub and Worker homes survive disconnection, restart and an answers-only turn", async () => {
+  const hubHome = join(home, "remote-hub"),
+    remoteHome = join(home, "remote-worker");
+  mkdirSync(hubHome);
+  mkdirSync(remoteHome);
+  const script = join(remoteHome, "business.cjs");
+  writeFileSync(
+    script,
+    `
+const fs = require('fs'), path = require('path');
+const context = JSON.parse(fs.readFileSync(process.env.AGENT_AUTOLOOP_CONTEXT));
+const report = path.join(process.env.AGENT_AUTOLOOP_HOME, 'report.json');
+if (context.answers.length) {
+  if (context.events.some(e => e.type === 'review') || JSON.parse(fs.readFileSync(report)).finding !== 'remote finding') process.exit(2);
+  fs.writeFileSync(path.join(process.env.AGENT_AUTOLOOP_HOME, 'answered'), 'yes');
+  console.log('已从远程报告接续');
+} else {
+  fs.appendFileSync(path.join(process.env.AGENT_AUTOLOOP_HOME, 'calls'), 'review\\n');
+  fs.writeFileSync(report, JSON.stringify({finding:'remote finding'}));
+  const receipt = {ask:[{key:'publish',title:'确认',text:'确认报告',options:['同意','拒绝'],about:'remote-report'}]};
+  console.log('报告已保存\\n' + String.fromCharCode(96).repeat(3) + 'agent-autoloop\\n' + JSON.stringify(receipt) + '\\n' + String.fromCharCode(96).repeat(3));
+}
+`,
+  );
+  writeFileSync(
+    join(remoteHome, "scan.cjs"),
+    `
+require('fs').writeFileSync(require('path').join(process.env.AGENT_AUTOLOOP_HOME,'scanned'),'yes');
+console.log('扫描完成\\n' + String.fromCharCode(96).repeat(3) + 'agent-autoloop\\n' + JSON.stringify({events:[{id:'review-request',type:'review',subject:'MR7',summary:'待审查'}]}) + '\\n' + String.fromCharCode(96).repeat(3));
+`,
+  );
+  const rulesFile = join(hubHome, "rules.json");
+  writeFileSync(
+    rulesFile,
+    JSON.stringify({
+      sources: { app: { name: "应用" } },
+      agents: {
+        scan: {
+          name: "远程扫描",
+          worker: "remote",
+          use: "command",
+          command: [process.execPath, join(remoteHome, "scan.cjs")],
+        },
+        review: { name: "远程审查", worker: "remote", use: "command", command: [process.execPath, script] },
+      },
+      channels: { chat: { name: "聊天", answerers: ["me"] } },
+      rules: [
+        {
+          name: "scan",
+          when: { source: "app", types: ["scan"] },
+          to: "scan",
+          cwd: remoteHome,
+          prompt: "扫描",
+          group: "scan",
+          parallel: 1,
+          emits: { source: "app", types: ["review"] },
+        },
+        {
+          name: "remote",
+          when: { source: "app", types: ["review"] },
+          to: "review",
+          cwd: remoteHome,
+          prompt: "审查",
+          group: "remote",
+          parallel: 1,
+        },
+      ],
+    }),
+  );
+  const moduleUrl = (file: string) => pathToFileURL(join(import.meta.dirname, "..", file)).href;
+  const children: ChildProcess[] = [];
+  function child(code: string, childHome: string) {
+    const p = spawn(process.execPath, ["--input-type=module", "-e", code], {
+      env: { ...process.env, AGENT_AUTOLOOP_HOME: childHome, AGENT_AUTOLOOP_RULES: rulesFile, SHELL: "/bin/sh" },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    children.push(p);
+    let errors = "";
+    p.stderr!.on("data", (chunk) => {
+      errors += chunk;
+    });
+    return { p, errors: () => errors };
+  }
+  async function message(p: ChildProcess, command?: string): Promise<any> {
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error("child response timed out")), 15000);
+      const receive = (value: unknown) => finish(undefined, value);
+      const exited = () => finish(new Error("child exited before responding"));
+      function finish(error?: Error, value?: unknown) {
+        clearTimeout(timer);
+        p.off("message", receive);
+        p.off("exit", exited);
+        if (error) reject(error);
+        else resolve(value);
+      }
+      p.once("message", receive);
+      p.once("exit", exited);
+      if (command) p.send(command);
+    });
+  }
+  async function stop(p: ChildProcess) {
+    if (p.exitCode !== null || p.signalCode !== null) return;
+    await new Promise<void>((resolve) => {
+      p.once("exit", () => resolve());
+      p.kill();
+    });
+  }
+  const hub = child(
+    `
+import {addKey} from ${JSON.stringify(moduleUrl("host/runtime.ts"))};
+import {serve} from ${JSON.stringify(moduleUrl("host/http.ts"))};
+const keys = {source:addKey('source','app'), worker:addKey('worker','remote'), local:addKey('worker','local'), channel:addKey('channel','chat')};
+let server = serve(0);
+await new Promise(r=>server.once('listening',r));
+const port=server.address().port;
+process.send({url:'http://127.0.0.1:'+port,...keys});
+process.on('message', async command=>{
+ if(command==='down') {server.closeAllConnections();await new Promise(r=>server.close(r));}
+ if(command==='up') {server=serve(port);await new Promise(r=>server.once('listening',r));}
+ process.send({ok:true});
+});`,
+    hubHome,
+  );
+  try {
+    const keys = await message(hub.p);
+    const { hubClient } = await import("../protocol/client.ts");
+    const source = hubClient(keys.url, keys.source),
+      channel = hubClient(keys.url, keys.channel);
+    const makeWorker = () =>
+      child(
+        `
+import {createWorker} from ${JSON.stringify(moduleUrl("worker/worker.ts"))};
+import {hubClient} from ${JSON.stringify(moduleUrl("protocol/client.ts"))};
+const worker=createWorker({hub:hubClient(${JSON.stringify(keys.url)},${JSON.stringify(keys.worker)}),name:'remote',capacity:1,wait:0});
+process.send({ready:true});
+process.on('message',async()=>{await worker.tick();process.send(worker.entries().map(e=>({run:e.run,result:e.result,rule:e.job.rule.name})));});`,
+        remoteHome,
+      );
+    await source.event({ id: "remote-scan", type: "scan", subject: "MR7", summary: "待审查" });
+    assert.equal(
+      (await hubClient(keys.url, keys.local).work({ claim: "local", wait: 0, running: [], capacity: true })).job,
+      null,
+    );
+    let remote = makeWorker();
+    await message(remote.p);
+    let held = await message(remote.p, "tick");
+    assert.equal(held[0]?.rule, "scan");
+    for (let i = 0; i < 100 && held[0]?.rule !== "remote"; i++) {
+      assert.ok(held.length <= 1, "capacity=1 must serialize scan and review");
+      await new Promise((r) => setTimeout(r, 20));
+      held = await message(remote.p, "tick");
+    }
+    assert.equal(held[0]?.rule, "remote");
+    assert.equal(existsSync(join(remoteHome, "scanned")), true);
+    assert.equal(existsSync(join(hubHome, "scanned")), false);
+    assert.equal(held.length, 1);
+    const run = held[0].run;
+    await message(hub.p, "down");
+    let entries = held;
+    for (let i = 0; i < 100 && !entries[0]?.result; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      entries = await message(remote.p, "tick");
+    }
+    assert.equal(entries[0]?.result?.outcome, "done", remote.errors());
+    assert.equal(entries[0].run, run);
+    assert.ok(existsSync(join(remoteHome, "worker", "runs", `${run}-1`, "entry.json")));
+    await stop(remote.p);
+    remote = makeWorker();
+    await message(remote.p);
+    assert.equal((await message(remote.p, "tick"))[0].run, run);
+    await message(hub.p, "up");
+    assert.deepEqual(await message(remote.p, "tick"), []);
+    assert.equal(readFileSync(join(remoteHome, "calls"), "utf8"), "review\n");
+    const card = (await channel.nextCard(0)).card;
+    assert.ok(card);
+    await channel.delivered(card.id, card.version, "remote-message");
+    await channel.answer(card.id, { choice: 0, by: "me", ref: "remote-message" });
+    await message(remote.p, "tick");
+    for (let i = 0; i < 100 && !existsSync(join(remoteHome, "answered")); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      await message(remote.p, "tick");
+    }
+    assert.ok(existsSync(join(remoteHome, "answered")), remote.errors());
+    for (let i = 0; i < 100; i++) {
+      if (!(await message(remote.p, "tick")).length) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(readFileSync(join(remoteHome, "calls"), "utf8"), "review\n");
+    assert.deepEqual(await message(remote.p, "tick"), []);
+    assert.equal(existsSync(join(hubHome, "report.json")), false);
+    assert.ok(existsSync(join(hubHome, "hub.db")));
+    assert.equal(existsSync(join(remoteHome, "hub.db")), false);
+  } finally {
+    for (const p of children.reverse()) await stop(p);
+  }
 });

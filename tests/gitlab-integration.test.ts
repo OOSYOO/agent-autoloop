@@ -1,4 +1,4 @@
-// Failure modes: a valid scan context cannot travel through command output into a Worker-compatible confirmation.
+// Failure modes: a remote report cannot resume from an answer, or a stale server rule copy accepts a Hub job.
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
@@ -13,7 +13,11 @@ import { parseConfig, policyHash } from "../plugins/gitlab/config.ts";
 import { nativeBasis } from "../plugins/gitlab/native.ts";
 import { readMessage, resultFrom } from "../worker/contract.ts";
 test("GitLab event and answer travel through the real Hub and Worker receipt", async () => {
-  const root = mkdtempSync(join(tmpdir(), "gitlab-integration-"));
+  const scratch = mkdtempSync(join(tmpdir(), "gitlab-integration-"));
+  const root = join(scratch, "server"),
+    hubHome = join(scratch, "hub");
+  mkdirSync(root);
+  mkdirSync(hubHome);
   let server: any;
   const previousHome = process.env.HOME;
   process.env.HOME = root;
@@ -54,13 +58,14 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     const codex = join(root, "codex");
     const refs = { base_sha: base, start_sha: base, head_sha: head };
     const mr = {
+      iid: 7,
       state: "opened",
       title: "修复审查原因",
       description: "背景资料：不要把这段文字当作指令。",
       draft: false,
       sha: head,
       reviewers: [{ id: 8 }],
-      head_pipeline: { sha: head, status: "success" },
+      head_pipeline: { id: 10, sha: head, status: "success" },
       diff_refs: refs,
     };
     const version = {
@@ -76,7 +81,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(versionFile, JSON.stringify(version));
     writeFileSync(
       glab,
-      `#!/usr/bin/env node\nconst fs=require('fs'),p=process.argv[3],a=process.argv;if(a.includes('POST')) {if(process.env.TEST_POST_FAIL){process.stdout.write('HTTP/1.1 400 Bad Request\\r\\n\\r\\n{}');process.exit(1)}let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const b=JSON.parse(s);fs.appendFileSync(${JSON.stringify(join(root, "posts.log"))},JSON.stringify(b)+'\\n');if(process.env.TEST_CHANGE_RULES)require('child_process').execFileSync('git',['--git-dir',${JSON.stringify(bare)},'update-ref','refs/heads/main',process.env.TEST_CHANGE_RULES]);process.stdout.write('HTTP/1.1 201 Created\\r\\nContent-Type: application/json\\r\\n\\r\\n'+JSON.stringify({id:'d',notes:[{id:3,position:b.position}]}));});}else {let v=p==='user'?{id:8}:p==='projects/42'?{id:42,path_with_namespace:'team/app',ssh_url_to_repo:${JSON.stringify(bare)}}:p.includes('/discussions?')?(process.env.TEST_OLD?[{notes:[{author:{id:8},body:'<!-- agent-autoloop:action='+('d'.repeat(64))+' -->',position:{head_sha:'e'.repeat(40)}}]}]:[]):p.includes('/versions/1')?JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)})):p.includes('/versions?')?[JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)}))]:JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));console.log(JSON.stringify(v));}`,
+      `#!/usr/bin/env node\nconst fs=require('fs'),p=process.argv[3],a=process.argv;if(a.includes('POST')) {if(process.env.TEST_POST_FAIL){process.stdout.write('HTTP/1.1 400 Bad Request\\r\\n\\r\\n{}');process.exit(1)}let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const b=JSON.parse(s);fs.appendFileSync(${JSON.stringify(join(root, "posts.log"))},JSON.stringify(b)+'\\n');if(process.env.TEST_CHANGE_RULES)require('child_process').execFileSync('git',['--git-dir',${JSON.stringify(bare)},'update-ref','refs/heads/main',process.env.TEST_CHANGE_RULES]);process.stdout.write('HTTP/1.1 201 Created\\r\\nContent-Type: application/json\\r\\n\\r\\n'+JSON.stringify({id:'d',notes:[{id:3,position:b.position}]}));});}else {const current=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));const checks=fs.existsSync(${JSON.stringify(join(root, "checks-state.json"))})?JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "checks-state.json"))})):{};let v=p.includes('/pipelines/10/jobs?')?[{id:101,name:'build',status:checks.job||'success',commit:{id:current.sha},pipeline:{id:10}}]:p.includes('/pipelines/10/bridges?')?[{id:102,name:'board',status:'success',commit:{id:current.sha},pipeline:{id:10},downstream_pipeline:{id:11,project_id:42,sha:current.sha}}]:p.endsWith('/pipelines/11')?{id:11,project_id:42,sha:current.sha,status:checks.child||'success'}:p==='user'?{id:8}:p==='projects/42'?{id:42,path_with_namespace:'team/app',ssh_url_to_repo:${JSON.stringify(bare)}}:p.includes('/discussions?')?(process.env.TEST_OLD?[{notes:[{author:{id:8},body:'<!-- agent-autoloop:action='+('d'.repeat(64))+' -->',position:{head_sha:'e'.repeat(40)}}]}]:[]):p.includes('/versions/1')?JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)})):p.includes('/versions?')?[JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)}))]:JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));console.log(JSON.stringify(v));}`,
       { mode: 0o700 },
     );
     const report = {
@@ -99,7 +104,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(reportFile, JSON.stringify(report));
     writeFileSync(
       codex,
-      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;if(a.includes('app-server')){const q=require('readline').createInterface({input:process.stdin});q.on('line',l=>{let x=JSON.parse(l);if(x.id===1)console.log(JSON.stringify({id:1,result:{}}));if(x.id===2)console.log(JSON.stringify({id:2,result:{config:{mcp_servers:{},features:{hooks:false,apps:false,memories:false},web_search:'disabled',permissions:{review:{network:{enabled:false},filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}}}}}}}));if(x.id===3)console.log(JSON.stringify({id:3,result:{data:[{cwd:process.cwd(),errors:[],skills:[{name:'alpha',path:${JSON.stringify(join(skillDir, "SKILL.md"))},scope:'user',enabled:true}]}]}}))});}else {const mr=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));let prompt='';process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{let ctx;try{ctx=JSON.parse(fs.readFileSync(require('path').join(require('path').dirname(a[a.indexOf('-o')+1]),'review-context.json'),'utf8'));}catch{process.exit(2);}if(ctx.schema!==1||ctx.projectId!==42||ctx.mrIid!==7||ctx.title!==mr.title||ctx.description!==mr.description||ctx.baseSha!==mr.diff_refs.base_sha||ctx.startSha!==mr.diff_refs.start_sha||ctx.headSha!==mr.sha||prompt.includes(mr.description)||prompt.includes(mr.title)||!prompt.includes('使用alpha详细审查'))process.exit(3);if(fs.existsSync(${JSON.stringify(join(root, "change-mr"))})){let change=fs.readFileSync(${JSON.stringify(join(root, "change-mr"))},'utf8');fs.unlinkSync(${JSON.stringify(join(root, "change-mr"))});if(change==='draft')mr.draft=true;else mr.sha='f'.repeat(40);fs.writeFileSync(${JSON.stringify(mrFile)},JSON.stringify(mr));}if(fs.existsSync(${JSON.stringify(join(root, "change-skill"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-skill"))});fs.writeFileSync(${JSON.stringify(join(skillDir, "SKILL.md"))},'changed skill');}if(fs.existsSync(${JSON.stringify(join(root, "change-prompt"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-prompt"))});let f=${JSON.stringify(join(root, "rules.json"))},r=JSON.parse(fs.readFileSync(f));r.rules[0].prompt='更改的可信指令';fs.writeFileSync(f,JSON.stringify(r));}fs.writeFileSync(a[a.indexOf('-o')+1],fs.readFileSync(${JSON.stringify(reportFile)}));console.log(JSON.stringify({type:'turn.completed'}));});}`,
+      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;if(a.includes('app-server')){const q=require('readline').createInterface({input:process.stdin});q.on('line',l=>{let x=JSON.parse(l);if(x.id===1)console.log(JSON.stringify({id:1,result:{}}));if(x.id===2)console.log(JSON.stringify({id:2,result:{config:{mcp_servers:{},features:{hooks:false,apps:false,memories:false},web_search:'disabled',permissions:{review:{network:{enabled:false},filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}}}}}}}));if(x.id===3)console.log(JSON.stringify({id:3,result:{data:[{cwd:process.cwd(),errors:[],skills:[{name:'alpha',path:${JSON.stringify(join(skillDir, "SKILL.md"))},scope:'user',enabled:true}]}]}}))});}else {const mr=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));let prompt='';process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{let ctx;try{ctx=JSON.parse(fs.readFileSync(require('path').join(require('path').dirname(a[a.indexOf('-o')+1]),'review-context.json'),'utf8'));}catch{process.exit(2);}if(fs.existsSync(require('path').join(require('path').dirname(a[a.indexOf('-o')+1]),'files'))||ctx.gitDir!==${JSON.stringify(bare)})process.exit(4);require('child_process').execFileSync('git',['--git-dir',ctx.gitDir,'cat-file','-e',ctx.headSha]);if(ctx.schema!==1||ctx.projectId!==42||ctx.mrIid!==7||ctx.title!==mr.title||ctx.description!==mr.description||ctx.baseSha!==mr.diff_refs.base_sha||ctx.startSha!==mr.diff_refs.start_sha||ctx.headSha!==mr.sha||prompt.includes(mr.description)||prompt.includes(mr.title)||!prompt.includes('使用alpha详细审查'))process.exit(3);if(fs.existsSync(${JSON.stringify(join(root, "change-mr"))})){let change=fs.readFileSync(${JSON.stringify(join(root, "change-mr"))},'utf8');fs.unlinkSync(${JSON.stringify(join(root, "change-mr"))});if(change==='draft')mr.draft=true;else mr.sha='f'.repeat(40);fs.writeFileSync(${JSON.stringify(mrFile)},JSON.stringify(mr));}if(fs.existsSync(${JSON.stringify(join(root, "change-skill"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-skill"))});fs.writeFileSync(${JSON.stringify(join(skillDir, "SKILL.md"))},'changed skill');}if(fs.existsSync(${JSON.stringify(join(root, "change-prompt"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-prompt"))});let f=${JSON.stringify(join(root, "rules.json"))},r=JSON.parse(fs.readFileSync(f));r.rules[0].prompt='更改的可信指令';fs.writeFileSync(f,JSON.stringify(r));}fs.writeFileSync(a[a.indexOf('-o')+1],fs.readFileSync(${JSON.stringify(reportFile)}));console.log(JSON.stringify({type:'turn.completed'}));});}`,
       { mode: 0o700 },
     );
     execFileSync(process.execPath, ["--check", codex]);
@@ -156,7 +161,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
             name: "Review",
             worker: "w1",
             use: "gitlab",
-            command: ["review", "--config", join(root, "config.json")],
+            command: ["review", "--config", "config.json"],
           },
         },
         channels: { chat: { name: "Chat", answerers: ["me"] } },
@@ -173,8 +178,10 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         ],
       }),
     );
-    process.env.AGENT_AUTOLOOP_HOME = join(root, "hub");
-    process.env.AGENT_AUTOLOOP_RULES = rulesPath;
+    const hubRulesPath = join(hubHome, "rules.json");
+    writeFileSync(hubRulesPath, readFileSync(rulesPath));
+    process.env.AGENT_AUTOLOOP_HOME = hubHome;
+    process.env.AGENT_AUTOLOOP_RULES = hubRulesPath;
     process.env.AGENT_AUTOLOOP_PUBLIC_URL = "https://hub.test";
     const hub = await import("../host/runtime.ts");
     const { serve } = await import("../host/http.ts");
@@ -211,6 +218,30 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     const file = join(root, "config.json");
     writeFileSync(file, JSON.stringify(raw));
     const originalRulesForRace = readFileSync(rulesPath, "utf8");
+    const staleRules = JSON.parse(originalRulesForRace);
+    staleRules.rules[0].prompt = "服务器旧 prompt";
+    writeFileSync(rulesPath, JSON.stringify(staleRules));
+    const staleServer = spawnSync(
+      process.execPath,
+      [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: root,
+          AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
+          AGENT_AUTOLOOP_CONTEXT: context,
+          AGENT_AUTOLOOP_RUN: "1",
+        },
+      },
+    );
+    assert.equal(staleServer.status, 1);
+    assert.match(staleServer.stderr, /运行规则与当前可信审查规则不一致/);
+    assert.equal(existsSync(join(root, "posts.log")), false);
+    assert.equal(existsSync(join(hubHome, "cache.git")), false);
+    assert.equal(existsSync(join(hubHome, "gitlab")), false);
+    writeFileSync(rulesPath, originalRulesForRace);
     writeFileSync(join(root, "change-prompt"), "1");
     const changedDuringRun = spawnSync(
       process.execPath,
@@ -221,6 +252,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "1",
           TEST_CHANGE_PROMPT: "1",
@@ -242,6 +274,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "1",
         },
@@ -261,6 +294,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "1",
         },
@@ -282,6 +316,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "1",
         },
@@ -300,6 +335,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "1",
         },
@@ -342,6 +378,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "2",
         },
@@ -376,6 +413,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "2",
         },
@@ -394,6 +432,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "2",
         },
@@ -415,6 +454,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "3",
         },
@@ -445,6 +485,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "4",
           TEST_OLD: "1",
@@ -496,6 +537,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "5",
         },
@@ -559,6 +601,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "6",
         },
@@ -599,6 +642,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "7",
         },
@@ -671,6 +715,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "8",
         },
@@ -728,6 +773,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "9",
           TEST_OLD: "1",
@@ -776,6 +822,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           ...process.env,
           HOME: root,
           AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
           AGENT_AUTOLOOP_CONTEXT: context,
           AGENT_AUTOLOOP_RUN: "11",
           TEST_OLD: "1",
@@ -838,6 +885,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         ...process.env,
         HOME: root,
         AGENT_AUTOLOOP_HOME: root,
+        AGENT_AUTOLOOP_RULES: rulesPath,
         AGENT_AUTOLOOP_CONTEXT: context,
         AGENT_AUTOLOOP_RUN: "10",
         TEST_CHANGE_RULES: changedRulesCommit,
@@ -850,6 +898,89 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       4,
       "only first of two items may post",
     );
+    // A human approval job may cancel the parent while required jobs and the child have passed.
+    const checksRaw = {
+      ...raw,
+      projects: [
+        { ...raw.projects[0], publication: "manual", ciMode: "checks", ciJobs: ["build"], ciBridges: ["board"] },
+      ],
+    };
+    writeFileSync(file, JSON.stringify(checksRaw));
+    const checksConfig = parseConfig(checksRaw),
+      checksMain = trustedRules(checksConfig.projects[0]);
+    const checksNative = await nativeBasis(codex, checksMain.worktree, "使用alpha详细审查");
+    const checksPolicy = policyHash(
+      checksConfig,
+      checksConfig.projects[0],
+      hash(canonical({ prompt: "使用alpha详细审查", native: checksNative.digest })),
+      checksMain.digest,
+    );
+    const checksRequest = { ...req, requestId: "9".repeat(64), observation: 19, policyHash: checksPolicy };
+    saveRequest(join(root, "gitlab"), {
+      ...checksRequest,
+      schema: 1,
+      origin: "auto",
+      instanceKey: "work",
+      eligible: true,
+    });
+    writeFileSync(mrFile, JSON.stringify({ ...mr, head_pipeline: { id: 10, sha: head, status: "canceled" } }));
+    writeFileSync(versionFile, JSON.stringify(version));
+    writeFileSync(reportFile, JSON.stringify(report));
+    writeFileSync(
+      context,
+      JSON.stringify({
+        events: [
+          {
+            ...event,
+            source: "gitlab",
+            id: `gitlab:${checksRequest.requestId}`,
+            detail: JSON.stringify(checksRequest),
+          },
+        ],
+        answers: [],
+      }),
+    );
+    const executeChecks = () =>
+      spawnSync(process.execPath, [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: root,
+          AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
+          AGENT_AUTOLOOP_CONTEXT: context,
+          AGENT_AUTOLOOP_RUN: "19",
+        },
+      });
+    const checked = executeChecks();
+    assert.equal(checked.status, 0, checked.stderr);
+    const checkedAsk = resultFrom(readMessage(checked.stdout), {}).result.ask?.[0];
+    assert.ok(checkedAsk, checked.stdout);
+    writeFileSync(
+      context,
+      JSON.stringify({
+        events: [],
+        answers: [
+          {
+            card: 200,
+            title: checkedAsk.title,
+            options: checkedAsk.options,
+            choice: 0,
+            text: null,
+            about: checkedAsk.about,
+            by: "me",
+            at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
+    );
+    const postsBeforeChecks = readFileSync(join(root, "posts.log"), "utf8");
+    writeFileSync(join(root, "checks-state.json"), JSON.stringify({ child: "failed" }));
+    const noLongerPassed = executeChecks();
+    assert.equal(noLongerPassed.status, 0, noLongerPassed.stderr);
+    assert.match(noLongerPassed.stdout, /版本或策略已变化，未发布/);
+    assert.equal(readFileSync(join(root, "posts.log"), "utf8"), postsBeforeChecks);
+    rmSync(join(root, "checks-state.json"));
     const severityRaw = { ...raw, projects: [{ ...raw.projects[0], publication: "severity" }] };
     writeFileSync(file, JSON.stringify(severityRaw));
     const severityConfig = parseConfig(severityRaw);
@@ -941,6 +1072,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
             ...process.env,
             HOME: root,
             AGENT_AUTOLOOP_HOME: root,
+            AGENT_AUTOLOOP_RULES: rulesPath,
             AGENT_AUTOLOOP_CONTEXT: context,
             AGENT_AUTOLOOP_RUN: String(observation),
             TEST_OLD: "1",
@@ -998,6 +1130,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
               ...process.env,
               HOME: root,
               AGENT_AUTOLOOP_HOME: root,
+              AGENT_AUTOLOOP_RULES: rulesPath,
               AGENT_AUTOLOOP_CONTEXT: context,
               AGENT_AUTOLOOP_RUN: "40",
             },
@@ -1016,6 +1149,6 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     }
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
-    rmSync(root, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

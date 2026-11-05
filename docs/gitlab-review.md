@@ -1,10 +1,10 @@
 # GitLab 审查配置
 
-GitLab 扩展运行在接单程序所在的 Mac。它使用现有的来源、规则、接单程序和卡片，不修改中台协议。先只启用人工确认；不要把私有配置、密钥、报告或裸仓库提交进项目。
+GitLab 扩展运行在接单程序所在的 Mac 或 Linux。它使用现有的来源、规则、接单程序和卡片，不修改中台协议。先只启用人工确认；不要把私有配置、密钥、报告或裸仓库提交进项目。
 
 1. 安装 Node 24 或更新版本、Codex CLI 和 glab，登录目标 GitLab。用 `glab api user --hostname <主机>` 核实账号 ID；确认 Codex 和飞书通道已经登录。飞书 CLI 本次实测版本为 1.0.98；旧版 1.0.80 不支持通道使用的 stdin 内容和卡片更新命令，需先运行 `lark-cli update`，无需为旧版修改插件。同一飞书应用已有卡片监听时不要再启动一个监听。
 2. 准备私有目录，权限设为 `0700`。创建 `gitlab` 来源并用 `agent-autoloop key new source gitlab` 生成该来源密钥，将输出保存为私有文件并设为 `0600`。不要把密钥放进规则或仓库。中台 `sources` 必须有 `gitlab`，对应项目的事件类型只能匹配一条 review 规则。
-3. 为项目准备独立裸 Git 缓存，不能使用正在开发的工作树。缓存须包含目标 MR 的 Head 和 Diff 的 base/start 对象；缺少对象时会从缓存中配置的可信 `origin` 拉取分支和该 MR 的 head。快照从裸对象导出完整文字资料和 Diff，`index.json` 映射原始路径；二进制以十六进制保存，无法完整导出时阻塞。文件改名为数据文件，不检出或运行 MR 代码，也不把 MR 的 AGENTS 或 Skill 当作指令。审查 Skill 文件须由本人信任。
+3. 为项目准备独立裸 Git 缓存，不能使用正在开发的工作树。缓存须包含目标 MR 的 Head 和 Diff 的 base/start 对象；缺少对象时从缓存的可信 origin 拉取分支与 MR head。在专用可信 main 工作树中启动 Codex，直接按固定 SHA 读取 Git 差异和所需文件，不再导出整库文字快照，不设置仓库大小上限。MR 上下文仅作为 JSON 资料，MR 的代码、AGENTS、Skill 和配置不作为指令；不检出或执行 MR，不改变日常开发目录。对象缺失、空间不足或模型执行失败明确报错，不能截断资料或冒充零 findings。
 4. 在私有目录新建下面的 JSON，替换所有占位值。`instanceUrl` 默认要求 HTTPS；只有本人明确认可的内网 HTTP 才设置与之完全相同的 `trustedHttpOrigin`，不会自动降级。`hubUrl` 指向本机中台，`sourceKeyPath` 指向第 2 步的密钥文件；`dataRoot` 是私有数据目录。模型和 effort 在配置顶层，一份配置内各项目共用；需要不同模型时使用不同配置文件及各自的 command/规则。
 
 ```json
@@ -80,3 +80,47 @@ GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
 重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
+
+
+## 远程 Worker
+
+中台与通道可以留在 Mac，扫描和审查一起交给 Linux Worker。复用现有协议，不需要共享文件系统；同一项目的扫描、审查及回答续办必须使用同一台机器、账号、规则和 dataRoot。服务器容量设为 1，避免扫描更新 main 时与审查并行；不要同时直接运行手工扫描。
+
+1. 在 Hub 创建独立 Worker 密钥，服务器的私有 `config.json` 仅包含下例配置；不要复制 Hub、owner 或通道密钥。GitLab 扫描另需来源密钥文件（0600）。
+
+```json
+{
+  "url": "http://127.0.0.1:13000",
+  "worker": { "name": "review-server", "key": "REPLACE_WITH_WORKER_KEY", "capacity": 1 }
+}
+```
+
+2. Hub 的目标 scan/review Agent 都指向 `review-server`，规则 cwd 填服务器私有目录。command 使用相对该机 `AGENT_AUTOLOOP_HOME` 的配置路径，例如 `gitlab/remote.json`。服务器部署同一份只读 rules.json；prompt、路由、cwd 或 command 变更前先暂停该项目扫描、排空活动轮次，再更新两端。运行时只核对审查规则与 prompt，不代替完整部署核对。
+3. GitLab 配置中的 hubUrl 与 Worker url 相同，项目只列本服务器负责的项目，首期设置 publication=manual。模型、原生 Skill 与 GitLab 身份在服务器核实；Hub 不需要目标仓库缓存或服务器 Codex 登录。
+4. Hub 只监听 Mac 回环地址时，可由 Mac 启动 `ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -R 127.0.0.1:13000:127.0.0.1:3351 <服务器SSH别名>`。将 3351 换成实际 Hub 端口，转发只绑定服务器回环地址。由系统服务维护隧道；Mac 离线时不能继续派单和接收回答，已完成结果由 Worker 落盘待重连。
+5. 共用服务器将 Node 24 独立解压到本实例私有目录，用绝对路径执行 `<实例>/app/bin/agent-autoloop.ts`，再执行 service install；服务会固定实际 Node 路径。默认 `<实例>/bin/agent-autoloop` 使用 PATH 中的 node，不保证使用私有版本。GitLab 配置也填 Codex/glab 的绝对路径。不要切换已有 Node 的默认版本、修改 shell profile、全局安装包或覆盖其他工具。
+6. 独立安装目录不提供账号级权限隔离；需要隔离时使用专用账号并单独登录。Linux 用户服务的退出登录保活须实际验证；开启 linger 会影响该账号全部用户服务的生命周期。Worker capacity 仅限制任务数，不是 CPU、内存或磁盘配额。裸缓存、完整 main 工作树和报告须有足够持久空间，tmpfs 不适合保存恢复记录。
+
+先执行两端 check、服务器 gitlab check，再核实 Worker 在线及一次授权测试 MR 的真实报告。切换已有项目或回退时，先停该项目扫描并收尾旧轮次、待确认卡和结果不明的评论；保留旧报告，不搬用旧批准或正在运行的 worker/runs，不同时开两端扫描入口。人工批准仍回到原 Worker 的报告目录，配置或版本变化使旧批准失效。
+
+
+### 按自动检查判断审查时机
+
+人工审批也是 pipeline job 的项目可显式使用 `ciMode: "checks"`，例如：
+
+```json
+{
+  "ciMode": "checks",
+  "ciJobs": ["check_squareline_sync", "build_code", "host_gate"],
+  "ciBridges": ["trigger_board_gate"]
+}
+```
+
+`ciJobs` 是必填、非空且不重复的精确名称数组；`ciBridges` 可省略，缺省为空数组。元素不能空白或带首尾空格。这两个字段只用于 checks；旧模式保持原行为。名称由部署者按可信 main 维护，新增或改名的 CI 也要同步配置。
+
+每项指定 job 必须是当前 MR head_pipeline 下、同 head SHA 的唯一当前尝试，状态必须为 success；failed、canceled、skipped、manual、未完成及缺失都不通过。指定 bridge 除自身成功，还要求关联的同项目子流水线实际成功且 SHA 一致，不能把触发成功当作测试完成。即使设置 allow_failure，列入此配置的检查也必须成功。人工审批等未列入的 job 不阻止开始审查，不改变项目本身的审批或合并要求。
+
+扫描、审查开始和完成、人工回答续办及每条评论发布前使用同一判断，并重读 MR 核对 pipeline ID 与 head。配置名称进入策略摘要，变更后旧批准失效。先升级插件再启用此模式；它不修改项目 CI 文件、不启动 job、不合并 MR。checks 模式以外不能配置 ciJobs/ciBridges。
+
+
+GitLab 资料读取方式已由整库文字转换改为直接读取 Git 对象，策略标识为 native-git-objects-v4。旧报告与旧批准不用于新策略；历史记录保留。Mac 与远程 Worker 使用同一插件实现、相同报告格式和人工确认流程，不维护两套审查路径。资源不足按实际失败报告，不增加项目专属大小配额。

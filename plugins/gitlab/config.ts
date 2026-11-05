@@ -7,7 +7,9 @@ export type Project = {
   projectPath?: string;
   rulesBranch?: string;
   publication: "manual" | "auto" | "severity";
-  ciMode: "required" | "confirmed-none" | "allow-skipped";
+  ciMode: "required" | "confirmed-none" | "allow-skipped" | "checks";
+  ciJobs?: string[];
+  ciBridges?: string[];
   cachePath: string;
 };
 export type Config = {
@@ -105,9 +107,18 @@ export function parseConfig(value: unknown, baseDir?: string): Config {
       ids.has(p.id) ||
       !path(p.cachePath) ||
       ![undefined, "manual", "auto", "severity"].includes(p.publication) ||
-      ![undefined, "required", "confirmed-none", "allow-skipped"].includes(p.ciMode)
+      ![undefined, "required", "confirmed-none", "allow-skipped", "checks"].includes(p.ciMode)
     )
       throw new Error("项目配置无效");
+    const names = (value: unknown): value is string[] =>
+      Array.isArray(value) &&
+      value.every((name) => typeof name === "string" && name.trim() === name && name.length > 0) &&
+      new Set(value).size === value.length;
+    if (p.ciMode === "checks") {
+      if (!names(p.ciJobs) || !p.ciJobs.length || (p.ciBridges !== undefined && !names(p.ciBridges)))
+        throw new Error("checks 模式需要非空且不重复的 ciJobs，ciBridges 也不得重复");
+    } else if (p.ciJobs !== undefined || p.ciBridges !== undefined)
+      throw new Error("ciJobs/ciBridges 只用于 checks 模式");
     if (
       p.projectPath !== undefined &&
       (typeof p.projectPath !== "string" ||
@@ -128,6 +139,7 @@ export function parseConfig(value: unknown, baseDir?: string): Config {
       cachePath: p.cachePath,
       publication: p.publication ?? "manual",
       ciMode: p.ciMode ?? "required",
+      ...(p.ciMode === "checks" ? { ciJobs: p.ciJobs, ciBridges: p.ciBridges ?? [] } : {}),
     };
   });
   return {
@@ -153,7 +165,7 @@ export function loadConfig(configFile: string): Config {
 export function policyHash(config: Config, project: Project, instructionsDigest: string, rulesDigest?: string): string {
   return hash(
     canonical({
-      reviewPolicy: "native-main-worktree-v3",
+      reviewPolicy: "native-git-objects-v4",
       instanceKey: config.instanceKey,
       instanceUrl: config.instanceUrl,
       trustedHttpOrigin: config.trustedHttpOrigin ?? null,
@@ -163,6 +175,7 @@ export function policyHash(config: Config, project: Project, instructionsDigest:
       rulesDigest: rulesDigest ?? null,
       publication: project.publication,
       ciMode: project.ciMode,
+      ...(project.ciMode === "checks" ? { ciJobs: project.ciJobs, ciBridges: project.ciBridges ?? [] } : {}),
       model: config.model,
       effort: config.effort ?? null,
       instructionsDigest,

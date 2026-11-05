@@ -68,7 +68,7 @@ flowchart TD
 
 `subject` 区分具体 MR。请求身份还与 Head 和审查策略相关：相同观察不会反复投递，代码或有效策略变化会产生新审查依据。Hub 自身也按来源与事件 ID 去重；业务去重和中台去重各守一层。
 
-匹配后 Hub 记录事件、创建或合并排队的轮次。Worker 领活后执行 `run.ts`；程序核实项目、缓存来源、MR 和 Diff 版本，并将唯一专用工作树更新到可信分支的当前 commit。Codex 在该目录原生读取仓库规则和 Skill；MR 的独立文字快照仍是资料，不成为启动命令或权限配置。
+匹配后 Hub 记录事件、创建或合并排队的轮次。Worker 领活后执行 `run.ts`；程序核实项目、缓存来源、MR 和 Diff 版本，并将唯一专用工作树更新到可信分支的当前 commit。Codex 在该目录原生读取仓库规则和 Skill；MR 以固定 base/head 的 Git 对象供 Codex 直接读取，上下文 JSON 仍是资料，不成为启动命令或权限配置；不再导出整库文字副本。
 
 报告记录本轮 main commit、`rules.prompt`、Codex 原生 Skill catalog 与依据摘要；main commit、指令或相关依据发生变化时，旧报告和批准失效。Codex 在专用工作树按原生机制读取仓库规则与 Skill；完整代码资料和报告留在私有目录，不塞进中台事件。Worker 将事件原文保存为资料，MR 文字不会成为指令。
 
@@ -86,7 +86,7 @@ flowchart TD
 | `rule.name` | `gitlab-review-14` | 规则及事项身份，不是特殊内置名称，避免为了美观随意改名 |
 | `rule.when` | cron 或 source/types | 时间触发与来源事件触发两种入口 |
 | `rule.to` | `gitlab-review` | 引用 agents 中的一个 Agent |
-| `rule.cwd` | 私有目录 `gitlab/work` | 业务脚本启动目录；不是 APP 开发仓库，也不是审查快照目录 |
+| `rule.cwd` | 私有目录 `gitlab/work` | 业务脚本启动目录；不是 APP 开发仓库，也不是 Codex 的 main 审查工作树 |
 | `rule.group` | `gitlab-review` | 多条规则可共用的并发限制组 |
 | `rule.parallel` | 1 | 按 subject 分开事项，同时该组最多一轮执行；不写时该规则合为一条执行线，组默认上限仍为 1 |
 | `rule.tell` | `needed` | 不为每次完成额外通知；仍处理需要人的 ask/notice |

@@ -259,3 +259,10 @@ GitLab review uses the trusted `prompt` from `rules.json`. Each repository reuse
 
 
 GitLab `publication: "severity"` publishes P0/P1 automatically without normal Feishu notifications, asks for P2 approval, and only notifies for P3. Empty findings still send an MR link requesting human review. Mixed reports use separate publication lists; unpositioned findings use ordinary Discussions. Unrelated Skill/plugin updates no longer invalidate reviews: the fingerprint tracks explicitly named native Skills, trusted instructions, main, model and relevant instruction settings. Native Codex still discovers and loads Skills. Existing manual/auto modes remain available.
+
+
+GitLab scanning and review can run together on a remote Linux Worker while the Hub and channels stay on the Mac. Use separate data directories, matching rule copies and server capacity=1. See [remote Worker setup](docs/gitlab-review.md#远程-worker).
+
+GitLab projects may opt into `ciMode: "checks"` with named jobs and same-project child pipelines. Required checks must succeed on the current head; human approval does not gate review. Existing modes keep their behavior. See [check-based review readiness](docs/gitlab-review.md#按自动检查判断审查时机).
+
+GitLab reviews run in the trusted main worktree and read MR Git objects at fixed SHAs directly. There is no full-tree text export or repository size cap. MR code is not checked out or executed; resource failures are reported explicitly, and approvals from the old policy are not reused.
