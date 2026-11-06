@@ -177,6 +177,6 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <rect class="item" x="804" y="602" width="114" height="36" rx="8"/>
 <text x="861" y="625" class="r" text-anchor="middle">核对线上版本</text>
 <rect class="plug" x="22" y="670" width="916" height="60" rx="14"/>
-<text x="40" y="693" class="r">GitLab：本地或远程 Worker → 复用并更新 main 工作树 → Codex 原生规则 / Skill + prompt + MR 资料</text>
+<text x="40" y="693" class="r">GitLab：本地或远程 Worker → 复用并更新 main 工作树 → 原生 Codex + prompt + MR 链接</text>
 <text x="40" y="715" class="s">分级：P0/P1 自动发布 · P2 本人确认 · 零发现通知人工审核；相关依据变化才重审</text>
 </svg>

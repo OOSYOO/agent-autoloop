@@ -44,7 +44,7 @@ flowchart TB
         subgraph EXT["我们维护 / plugins/gitlab"]
             P["poll.ts / GitLab 采集与准入"]
             R["run.ts / 单个 MR 审查与发布"]
-            D[("私有工作目录 / Git 对象、报告、发布意图")]
+            D[("私有工作目录 / 报告、发布意图")]
         end
         X["原生 Codex CLI / 只读分析"]
     end
@@ -58,9 +58,9 @@ flowchart TB
     P -->|"读取 MR、身份、CI"| GL
     P -->|"POST /v1/events"| H
     R -->|"读取版本与 Diff；受控发布 Discussion"| GL
-    R -->|"准备 Git 对象；保存报告和意图"| D
+    R -->|"发送 MR 链接；保存报告和意图"| D
     R -->|"codex exec / 指定模型"| X
-    X -->|"读取固定 SHA 对象；输出 Findings"| D
+    X -->|"自行读取 MR 链接；输出 Findings"| D
     R -->|"done / ask / notice 回执"| W
     CH -->|"cards/next、delivered、answer"| H
     CH -->|"lark-cli / bot 私聊"| FS
@@ -74,13 +74,13 @@ flowchart TB
 | 组件 | 责任 | 不承担的责任 |
 |---|---|---|
 | poll.ts | 分页读取授权项目，确定 Reviewer/Draft/CI，发稳定 ID 的来源事件 | 不调用模型，不改代码，不发布评论 |
-| run.ts | 核对 MR 版本，准备 Git 对象，运行 Codex，校验结果，生成 ask，校验回答，发布合格评论 | 不自建队列、Worker、并发槽位或失败计数 |
+| run.ts | 核对 MR 版本，发送 prompt 与 MR 链接，运行 Codex，校验结果，生成 ask，校验回答，发布合格评论 | 不自建队列、Worker、并发槽位或失败计数 |
 | 私有工作目录 | 保存报告原文、确定的待发布文本、版本绑定和写入意图，供同机恢复 | 不保存另一套运行状态机，不替代上游事实日志 |
 | Codex CLI | 基于可信 Skill 与代码资料产出 Findings | 不持有 GitLab 写入身份，不决定授权，不自行调用发布 API |
 | 上游 Hub / Worker | 事项、路由、执行、重试、回答、停止与重连 | 不理解 GitLab 或严重度，不做语义问题关联 |
 | 上游飞书通道 | 现成卡片、本人回答验证与消息更新 | 不新增产品面板 |
 
-使用现有 `use: command` 启动脚本；不需要新增插件发现方式。业务代码只用 Node 自带模块及自身目录文件。原生 Codex 调用见 [GitLab 调用器](../../plugins/gitlab/codex.ts)，固定 SHA 的对象准备见 [对象入口](../../plugins/gitlab/objects.ts)，不启用 GitHub 合并发布流程。
+使用现有 `use: command` 启动脚本；不需要新增插件发现方式。业务代码只用 Node 自带模块及自身目录文件。原生 Codex 调用见 [GitLab 调用器](../../plugins/gitlab/codex.ts)，不启用 GitHub 合并发布流程。
 
 采用上游飞书通道前必须确认同一应用没有其他卡片监听占用；这是现有通道的运行约束，不另写一套回调系统来绕过。
 
@@ -123,7 +123,7 @@ sequenceDiagram
     H-->>W: Job（规则与 context）
     W->>R: command argv；AGENT_AUTOLOOP_CONTEXT
     R->>G: 重新核对 Head，读取 Diff 与代码对象
-    R->>R: 准备固定 SHA Git 对象，不检出 MR
+    R->>R: 在 main 目录启动 Codex，发送 prompt 与 MR 链接
     R->>X: codex exec（指定模型、可信 Skill）
     X-->>R: Findings
     R->>R: 校验并持久化报告与待发布内容
@@ -270,7 +270,6 @@ poll 先原子保存请求及待发送记录，再 POST，收到接受且正确�
 |---|---|
 | `schema` | 整数 1 |
 | `requestId/projectId/mrIid/headSha/policyHash` | 与已核实请求一致，由脚本写入 |
-| `baseSha/startSha` | 同一 GitLab Diff 版本的完整 40 位 SHA |
 | `model/instructionsDigest/runId` | 配置模型 string、可信 prompt 与 Skill 依据摘要、上游运行正整数；不声称模型已被实际观测 |
 | `trustedRules` | 可信分支与本轮 main commit 摘要 |
 | `status` | 脚本写入 reviewed |
@@ -291,11 +290,11 @@ FindingV1：`severity` 为 P0/P1/P2/P3；`title` 非空≤200字符；`evidence/
 
 以上是模型输出示例，不是完整 ReportV1；脚本增加可信字段后才形成报告。无法解析、非成功退出、缺失完成标志或 complete 为 false 均使本轮失败，不能当作无缺陷。有证据且属于 MR 变更或影响范围的需求和规范矛盾作为 finding，不向作者提问；仅真实执行障碍可令 complete 为 false。每次模型调用的 prompt、schema、原始输出、事件流、模型及状态写入私有审计目录，报告关联相对路径。
 
-专用审查工作树从裸缓存的可信远端分支更新，Codex 在其中原生读取适用仓库规则与 Skill。MR 内容另从裸 Git 对象导出为文字资料，MR 的 AGENTS/Skill 不作为指令，不执行 MR 代码、测试、配置或 hooks。每轮核对实际 main commit 与 Codex 原生 catalog、文件和有效配置指纹；发送前重新核实。Codex 保留用户原生配置和工具；只读审查、不执行 MR 代码、测试或 hooks、不发布是任务要求，插件不另外封禁用户工具或配置。模型从配置取值，参数不受支持则本轮失败。
+专用审查目录从可信 main 更新；随后启动原生 Codex，发送 rules.prompt、可信构造的 MR 链接及本轮 head。Codex 自行按 Skill 读取 MR；插件不请求 versions/diffs、不准备 MR Git 对象或内容副本。使用原生工具配置，任务要求不检出、不执行 MR 代码、测试或 hooks。结构化模型输出仅供结果分流，不改变原生资料读取过程。
 
 ### 5.5 人工确认：run → ask → answer → run
 
-构造 ManifestV1 并原子保存后才输出 ask。Manifest 字段：`schema:1`、`reportHash/headSha/policyHash`、`items`。每个 item 包含最终 `body`（不含机器标记）、经 Diff 校验的 `position`、`actionKey`。按 path/side/line/body 的稳定顺序排列；manifestHash 为规范化 JSON SHA-256。P3、无合法位置和不完整报告不进入 items。
+构造 ManifestV1 并原子保存后才输出 ask。Manifest 字段：`schema:1`、`reportHash/headSha/policyHash`、`items`。每个 item 包含最终 `body`（不含机器标记）、固定为 null 的 `position`、`actionKey`。按 path/side/line/body 的稳定顺序排列；manifestHash 为规范化 JSON SHA-256。P3 和不完整报告不进入 items；无行号问题仍以普通评论发布。
 
 ask 是原生结构：`key="publish:<manifestHash>"`，title ≤200，text ≤4000，options 固定 `["发布这份报告中的评论","不发布"]`，about 为 `{"schema":1,"kind":"publish","manifestHash":"<64位摘要>"}` 的 JSON 字符串（上游 about 字段为 string）。text 或同报告摘要的飞书通知页包含全部 findings、位置与实际发布标记；超过十页时本轮失败，不创建批准卡。
 
@@ -316,18 +315,17 @@ CLI 使用 `agent-autoloop answer <cardId> 1` 批准，2 拒绝；HTTP choice �
 | 身份 | GET /user | id 必须等于配置 reviewerId |
 | 发现 | GET /projects/:id/merge_requests | query state=opened、page/per_page；遍历全部页并在本机核对 reviewer，以观察被移除后重新指定 |
 | 复核 | GET /projects/:id/merge_requests/:iid | state、draft、reviewers、sha、diff_refs、head_pipeline；缺字段不得自动放行 |
-| 版本/行号 | MR versions、diffs 对应接口 | 使用同一版本的 base/start/head 与 old/new path；截断、折叠或拿不到完整 diff 时阻塞相关评论 |
 | 去重核查 | GET /projects/:id/merge_requests/:iid/discussions | 全页查询作者、正文标记、position 和远端标识 |
 | 评论 | POST /projects/:id/merge_requests/:iid/discussions | 无 query，body 见下；HTTP 201 后保存 Discussion id、notes[].id |
 
-POST body 字段：`body:string` 为最终评论加自动化来源及 `<!-- agent-autoloop:action=<actionKey> -->`；`position.position_type="text"`；`position.base_sha/start_sha/head_sha` 为核实的三元组；`position.old_path/new_path` 从 diff 取；新增行带 new_line，删除行带 old_line，上下文行按 GitLab 规则带两侧坐标。position 不由用户手改或模型直接定稿。
+POST body 只含 `body:string`：最终评论含文件、行号、自动化来源及 `<!-- agent-autoloop:action=<actionKey> -->`。不提交 position，不下载 Diff 来定位。
 
 `actionKey = SHA256(JSON([instanceKey,projectId,mrIid,headSha,body,position]))`，JSON 使用第 5.4 节规范化；body 为添加标记前的精确内容，避免递归摘要。相同 SHA 的相同内容/位置复用 key，不承诺识别任意模型改写的语义等价问题。已有有效报告优先复用，避免同 SHA 无故重跑。
 
 | 状态/错误 | 处理 |
 |---|---|
-| 201 | 保存远端 id 和实际 position；仍核对发送后版本，竞争时如实报告 |
-| 400/422 | 位置/内容不合法；阻塞该项，不猜行号改发 |
+| 201 | 保存远端 id 和 null position；仍核对发送后版本，竞争时如实报告 |
+| 400/422 | 评论请求不合法；报告失败，不盲目重发 |
 | 401/403 | 身份/权限问题，ask；不自动换账号 |
 | 404 | 核对 MR 是否存在/可访问；不当成零问题 |
 | 429 | 读取请求遵循 Retry-After；写入仍先判断是否已发送，不盲重试 |
@@ -374,7 +372,7 @@ GitLab 没有与本地文件事务联动的“当前 Head 等于预期才创建 
 |---|---|---|---|
 | 上游协议与 Mac 状态恢复（SYS-01/07/09） | L1 | 已有 tests/conformance.test.ts | 既有接口、鉴权、重放通过 |
 | 准入、分页与规则（SYS-02/03、GL-01/02/03/05） | L2 | tests/gitlab-poll.test.ts | Reviewer、Draft、当前 CI、允许 skipped 和无 CI 配置均正确；多页无遗漏、无重复派单 |
-| Codex 调用与 Git 对象（SYS-04/05、GL-06/07/08） | L2 | `tests/gitlab-codex.test.ts`、`tests/gitlab-objects.test.ts`、`tests/gitlab-integration.test.ts` | 假 Codex 验证原生参数、精确 SHA、直接读取 Git 对象及完整结果；不调用真实模型 |
+| 原生 Codex 与 MR 链接（SYS-04/05、GL-06/07/08） | L2 | `tests/gitlab-codex.test.ts`、`tests/gitlab-manifest.test.ts`、`tests/gitlab-integration.test.ts` | 假 Codex 验证原生参数、prompt+MR 链接及完整结果，拒绝任何插件 versions/diffs 请求；不调用真实模型 |
 | 人工回答接续（SYS-08、PUB-02/07/09） | L1 | tests/gitlab-review.test.ts | answers-only 可恢复；旧 SHA/变更内容/自由文本不授权 |
 | 同版本发布去重（PUB-01/04/08/10） | L2 | tests/gitlab-publish.test.ts | 超时/崩溃先核查，同条评论不盲重发；P3 不发 |
 | 当前版本与 Diff 位置（PUB-03） | L2 | 同上，假 GitLab 并发变更 | 合法坐标才发布；过期不发；竞争窗口已发旧版本如实标记 |
@@ -401,6 +399,6 @@ GitLab 实例的 Diff/CI 字段、Codex 参数支持和飞书权限仍需真实�
 GitLab 规则的 `prompt` 是任务指令来源；旧 GitLab `skill`、`skillPath`、`projects[].rules` 和 GitLab 的 `rule.skill` 必须移除。Codex 原生发现规则与 Skill，Worker Job 规则与当前可信规则不一致时拒绝。
 
 
-GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
+GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
 重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。

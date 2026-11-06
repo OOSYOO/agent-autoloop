@@ -11,7 +11,6 @@ import { readRequests } from "./request.ts";
 import { trustedRules, verifyProjectRemote } from "./trusted-rules.ts";
 import { manualOverrides } from "./manual.ts";
 import { eligibleForReview } from "./ci.ts";
-import { positionFor } from "./diff.ts";
 import { requiresComparison } from "./auto.ts";
 import { publishOne } from "./publish.ts";
 import { HOME, RULES_FILE } from "../../host/home.ts";
@@ -152,10 +151,7 @@ async function publishManifest(
     const mr = (await currentGl.get(path)) as any;
     return (
       (await eligibleForReview(currentGl, currentProject, mr, latest.reviewerId, overrides)) &&
-      mr.sha === report.headSha &&
-      mr.diff_refs?.head_sha === report.headSha &&
-      mr.diff_refs?.base_sha === report.baseSha &&
-      mr.diff_refs?.start_sha === report.startSha
+      mr.sha === report.headSha
     );
   };
   if (!(await current()))
@@ -172,52 +168,14 @@ async function publishManifest(
     )
       ? "sent-stale"
       : "stale";
-  const versions = await gl.list(`${path}/versions?per_page=100`);
-  const matches = versions.filter(
-    (v: any) =>
-      v.head_commit_sha === report.headSha &&
-      v.base_commit_sha === report.baseSha &&
-      v.start_commit_sha === report.startSha,
-  ) as any[];
-  if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id)) throw new Error("无法确认 Diff 版本");
-  const version = (await gl.get(`${path}/versions/${matches[0].id}`)) as any;
-  if (
-    version.head_commit_sha !== report.headSha ||
-    version.base_commit_sha !== report.baseSha ||
-    version.start_commit_sha !== report.startSha ||
-    !Array.isArray(version.diffs) ||
-    version.diffs.some((d: any) => d.collapsed || d.too_large || typeof d.diff !== "string")
-  )
-    throw new Error("Diff 不完整");
-  const refs = { base_sha: report.baseSha, start_sha: report.startSha, head_sha: report.headSha };
   for (const item of man.items) {
+    if (!item || typeof item.body !== "string" || typeof item.actionKey !== "string") throw new Error("待发布内容无效");
+    if (item.position !== null) return "stale";
     if (
-      !item ||
-      typeof item.body !== "string" ||
-      (item.position === null && project.publication !== "severity") ||
-      typeof item.actionKey !== "string"
+      hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, null])) !==
+      item.actionKey
     )
-      throw new Error("待发布内容无效");
-    const p = item.position;
-    if (p === null) {
-      if (
-        hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, null])) !==
-        item.actionKey
-      )
-        throw new Error("评论内容已变化");
-      continue;
-    }
-    if (!p || typeof p !== "object") throw new Error("评论位置无效");
-    const side = p.new_line !== undefined ? "new" : "old",
-      line = side === "new" ? p.new_line : p.old_line,
-      path = side === "new" ? p.new_path : p.old_path;
-    const position = positionFor(version.diffs, refs, path, side, line);
-    if (
-      !position ||
-      canonical(position) !== canonical(p) ||
-      hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, p])) !== item.actionKey
-    )
-      throw new Error("评论位置或内容已变化");
+      throw new Error("评论内容已变化");
   }
   for (const item of man.items) {
     const body = `${item.body}\n\n由 agent-autoloop 生成。\n<!-- agent-autoloop:action=${item.actionKey} -->`;
@@ -227,38 +185,16 @@ async function publishManifest(
         const discussions = await gl.list(`${path}/discussions?per_page=100`);
         for (const discussion of discussions as any[])
           for (const note of discussion.notes ?? []) {
-            if (
-              note.author?.id !== config.reviewerId ||
-              note.body !== body ||
-              (item.position === null ? note.position != null : !note.position)
-            )
-              continue;
-            const position =
-              item.position === null
-                ? null
-                : Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
-            if (
-              canonical(position) === canonical(item.position) &&
-              typeof discussion.id === "string" &&
-              Number.isSafeInteger(note.id)
-            )
-              return { discussionId: discussion.id, noteId: note.id, position };
+            if (note.author?.id !== config.reviewerId || note.body !== body || note.position != null) continue;
+            if (typeof discussion.id === "string" && Number.isSafeInteger(note.id))
+              return { discussionId: discussion.id, noteId: note.id, position: null };
           }
         return null;
       },
       post: async () => {
-        const result = (await gl.post(
-          `${path}/discussions`,
-          item.position === null ? { body } : { body, position: item.position },
-        )) as any;
+        const result = (await gl.post(`${path}/discussions`, { body })) as any;
         const note = result?.notes?.[0];
-        const position =
-          item.position === null
-            ? note?.position == null
-              ? null
-              : note.position
-            : note?.position && Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
-        return { discussionId: result?.id, noteId: note?.id, position };
+        return { discussionId: result?.id, noteId: note?.id, position: note?.position ?? null };
       },
     });
     if (result !== "sent") return result;

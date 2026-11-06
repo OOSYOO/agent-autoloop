@@ -165,7 +165,7 @@ export function loadConfig(configFile: string): Config {
 export function policyHash(config: Config, project: Project, instructionsDigest: string, rulesDigest?: string): string {
   return hash(
     canonical({
-      reviewPolicy: "native-git-objects-v4",
+      reviewPolicy: "native-mr-url-v5",
       instanceKey: config.instanceKey,
       instanceUrl: config.instanceUrl,
       trustedHttpOrigin: config.trustedHttpOrigin ?? null,

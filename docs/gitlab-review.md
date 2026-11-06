@@ -4,7 +4,7 @@ GitLab 扩展运行在接单程序所在的 Mac 或 Linux。它使用现有的�
 
 1. 安装 Node 24 或更新版本、Codex CLI 和 glab，登录目标 GitLab。用 `glab api user --hostname <主机>` 核实账号 ID；确认 Codex 和飞书通道已经登录。飞书 CLI 本次实测版本为 1.0.98；旧版 1.0.80 不支持通道使用的 stdin 内容和卡片更新命令，需先运行 `lark-cli update`，无需为旧版修改插件。同一飞书应用已有卡片监听时不要再启动一个监听。
 2. 准备私有目录，权限设为 `0700`。创建 `gitlab` 来源并用 `agent-autoloop key new source gitlab` 生成该来源密钥，将输出保存为私有文件并设为 `0600`。不要把密钥放进规则或仓库。中台 `sources` 必须有 `gitlab`，对应项目的事件类型只能匹配一条 review 规则。
-3. 为项目准备独立裸 Git 缓存，不能使用正在开发的工作树。缓存须包含目标 MR 的 Head 和 Diff 的 base/start 对象；缺少对象时从缓存的可信 origin 拉取分支与 MR head。在专用可信 main 工作树中启动 Codex，直接按固定 SHA 读取 Git 差异和所需文件，不再导出整库文字快照，不设置仓库大小上限。MR 上下文仅作为 JSON 资料，MR 的代码、AGENTS、Skill 和配置不作为指令；不检出或执行 MR，不改变日常开发目录。对象缺失、空间不足或模型执行失败明确报错，不能截断资料或冒充零 findings。
+3. 为项目准备独立裸 Git 仓库及其专用 main 工作树，用于提供可信审查目录。任务只在该目录启动原生 Codex，发送 rules.prompt 与 MR 链接，附当前提交供核对。插件不调用 versions/diffs 下载 MR 差异，不准备 MR 对象或上下文副本；读取 MR 由 Codex 自己完成。不会更新日常开发目录。
 4. 在私有目录新建下面的 JSON，替换所有占位值。`instanceUrl` 默认要求 HTTPS；只有本人明确认可的内网 HTTP 才设置与之完全相同的 `trustedHttpOrigin`，不会自动降级。`hubUrl` 指向本机中台，`sourceKeyPath` 指向第 2 步的密钥文件；`dataRoot` 是私有数据目录。模型和 effort 在配置顶层，一份配置内各项目共用；需要不同模型时使用不同配置文件及各自的 command/规则。
 
 ```json
@@ -63,7 +63,7 @@ GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub
 配置路径相对 `AGENT_AUTOLOOP_HOME`；密钥、数据和裸缓存路径相对配置文件。`codexPath`/`glabPath` 可写程序名；扫描仍使用通用 cron。
 
 6. 在启用定时扫描前运行 `agent-autoloop gitlab check` 和 `agent-autoloop check`，核对每个项目类型仅一条规则匹配、来源密钥身份及飞书本人收件人。可在终端使用 `agent-autoloop gitlab scan --mr <MR链接>` 手动请求；若本人要覆盖 reviewer、draft 或 ci 门槛，追加 `--override reviewer,draft,ci --reason <原因>`，仅填写需要覆盖的项。覆盖不改变版本和发布策略。修复未路由的规则后，使用 `--retry-unrouted` 启动扫描，让新观察重新投递。
-7. 用 `agent-autoloop status` 查看事项。manual/auto 模式的飞书展示全部 findings，并标明哪些会发布为行内评论；多页时按 MR、版本和报告摘要核对全部页面。人工发布卡仅批准其中标记为“将发布”的评论；也可用 `agent-autoloop answer <卡片ID> 1` 发布或 `2` 拒绝。需求、文档或验收标准的矛盾作为 finding，不会暂停审查向作者提问。无法读取或模型运行失败时，本轮失败而非报告零 findings。内容超过飞书可承载容量时本轮失败，不产生不完整的批准卡。自动模式仅发布有有效 Diff 位置的 P0–P2；发现本工具在其他版本已发过评论时，整份报告转人工比较。停止当前轮不能撤回已发评论；要停止后续扫描，应关闭对应规则。
+7. 用 `agent-autoloop status` 查看事项。manual/auto 模式的飞书展示全部 findings，并标明哪些会发布为普通评论；多页时按 MR、版本和报告摘要核对全部页面。人工发布卡仅批准其中标记为“将发布”的评论；也可用 `agent-autoloop answer <卡片ID> 1` 发布或 `2` 拒绝。需求、文档或验收标准的矛盾作为 finding，不会暂停审查向作者提问。无法读取或模型运行失败时，本轮失败而非报告零 findings。内容超过飞书可承载容量时本轮失败，不产生不完整的批准卡。自动模式发布 P0–P2 的普通 Discussion；发现本工具在其他版本已发过评论时，整份报告转人工比较。停止当前轮不能撤回已发评论；要停止后续扫描，应关闭对应规则。
 
 每次模型调用的 prompt、schema、原始输出、事件流与模型状态保存在私有审计目录，报告以相对路径关联；不保存环境变量。报告、确认和外部动作记录保存在 `<dataRoot>/gitlab/`。如果发送结果不明，系统先核查，不会仅因为暂时查不到评论就重发；请本人核查 GitLab。真实测试 MR 和飞书收件人须明确授权后再做写入验收。
 
@@ -77,7 +77,7 @@ GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub
 `gitlab check` 仅核对本地配置、程序、密钥权限、路由和裸缓存，显示派生的审查工作树路径；不联网、不验证原生 Skill 或运行安全配置、不审查、不发消息；GitLab 登录状态可另用 glab 检查。数据目录自身改名仍需重新安装入口和系统服务；备份时应一起备份配置、密钥和业务记录，不能只移动 app。
 
 
-GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
+GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
 重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
 
@@ -123,4 +123,4 @@ GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发�
 扫描、审查开始和完成、人工回答续办及每条评论发布前使用同一判断，并重读 MR 核对 pipeline ID 与 head。配置名称进入策略摘要，变更后旧批准失效。先升级插件再启用此模式；它不修改项目 CI 文件、不启动 job、不合并 MR。checks 模式以外不能配置 ciJobs/ciBridges。
 
 
-GitLab 资料读取方式已由整库文字转换改为直接读取 Git 对象，策略标识为 native-git-objects-v4。旧报告与旧批准不用于新策略；历史记录保留。Mac 与远程 Worker 使用同一插件实现、相同报告格式和人工确认流程，不维护两套审查路径。资源不足按实际失败报告，不增加项目专属大小配额。
+GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。旧策略报告与批准不复用。

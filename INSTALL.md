@@ -99,13 +99,13 @@ GitLab MR 审查另见 [GitLab 审查配置](docs/gitlab-review.md)，先使用�
 
 GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](docs/gitlab-review.md)。
 
-GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 作为独立只读资料提供，不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 以链接交给 Codex 自行读取，要求不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
 
 
 更新此开发版前确认实例空闲并停止自身服务，备份配置后移除上述旧字段；不需要数据迁移。保留数据库、密钥、历史和已有兼容符号链接，更新程序后只启动一份服务及飞书监听。`gitlab check` 通过只代表本地配置有效；原生 Skill 目录在扫描时读取，实际使用情况由审查过程记录。专用工作树由裸缓存路径派生为同目录的 `<缓存名>.codereview-worktree`，不使用日常开发目录。
 
 
-GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
+GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
 重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
 
@@ -114,4 +114,4 @@ GitLab 扫描与审查可一起交给远程 Linux Worker，中台与通道留在
 
 GitLab 可显式使用 checks 模式，按指定自动检查和同项目子流水线成功决定审查时机，人工审批不阻止开始审查；旧模式保持原行为，详见[自动检查门槛](docs/gitlab-review.md#按自动检查判断审查时机)。
 
-GitLab 审查在可信 main 仓库中直接读取固定 SHA 的 MR Git 对象，不再导出整库文字快照或限制仓库大小；不检出或执行 MR。资源不足明确报错，旧策略报告与批准不复用。
+GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。旧策略报告与批准不复用。

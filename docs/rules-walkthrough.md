@@ -68,7 +68,7 @@ flowchart TD
 
 `subject` 区分具体 MR。请求身份还与 Head 和审查策略相关：相同观察不会反复投递，代码或有效策略变化会产生新审查依据。Hub 自身也按来源与事件 ID 去重；业务去重和中台去重各守一层。
 
-匹配后 Hub 记录事件、创建或合并排队的轮次。Worker 领活后执行 `run.ts`；程序核实项目、缓存来源、MR 和 Diff 版本，并将唯一专用工作树更新到可信分支的当前 commit。Codex 在该目录原生读取仓库规则和 Skill；MR 以固定 base/head 的 Git 对象供 Codex 直接读取，上下文 JSON 仍是资料，不成为启动命令或权限配置；不再导出整库文字副本。
+匹配后 Hub 记录事件、创建或合并排队的轮次。Worker 执行 run.ts，核对项目和 MR 版本、更新专用 main 工作目录，然后启动原生 Codex，发送可信 prompt 和 MR 链接。Codex 自己按 Skill 读取 MR；插件不下载 Diff 或准备 MR Git 对象、上下文副本。
 
 报告记录本轮 main commit、`rules.prompt`、Codex 原生 Skill catalog 与依据摘要；main commit、指令或相关依据发生变化时，旧报告和批准失效。Codex 在专用工作树按原生机制读取仓库规则与 Skill；完整代码资料和报告留在私有目录，不塞进中台事件。Worker 将事件原文保存为资料，MR 文字不会成为指令。
 
@@ -125,6 +125,6 @@ agent-autoloop why 12        # 第 12 轮经历了什么
 配置里的模型、项目、规范属于 GitLab 插件；cron、路由、并发属于中台。沿这个分工修改，就能避免将“没有派出任务”和“任务内部审查失败”混为一谈。
 
 
-GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
+GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
 重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。

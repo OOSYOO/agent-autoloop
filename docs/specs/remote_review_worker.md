@@ -44,7 +44,7 @@ flowchart LR
         Scan["plugins/gitlab/poll.ts／扫描并登记请求"]
         Review["plugins/gitlab/run.ts + resume.ts／审查与确认后发布"]
         Data["dataRoot/gitlab／请求、报告、发布记录"]
-        Git["裸缓存 + codereview-worktree／Git 对象与可信 main"]
+        Git["裸仓库 + codereview-worktree／可信 main"]
         Codex["plugins/gitlab/codex.ts／启动本机 Codex"]
         Worker -->|"gitlab agent：scan / review"| Scan
         Worker -->|"gitlab agent：review"| Review
@@ -53,13 +53,13 @@ flowchart LR
         Scan -->|"读写请求"| Data
         Review -->|"读写报告与发布记录"| Data
         Scan -->|"trustedRules；nativeBasis"| Git
-        Review -->|"trustedRules；准备 MR Git 对象"| Git
+        Review -->|"trustedRules；准备 main 目录"| Git
         Review -->|"固定 prompt、base/head 与 Git 目录"| Codex
     end
     Rules -.->|"维护时部署副本，不含密钥"| Copy
     Worker -->|"GET /v1/work；POST started/result"| Hub
     Scan -->|"POST /v1/events"| Hub
-    Scan -->|"glab API + git fetch"| GL["GitLab／MR 与 Git 对象"]
+    Scan -->|"glab API + git fetch"| GL["GitLab／MR 元数据"]
     Review -->|"复核 MR；批准后 discussions"| GL
 ```
 
@@ -93,7 +93,7 @@ sequenceDiagram
     H-->>W: Job(scan, run, token, rule)
     W->>P: gitlab agent：scan --config gitlab/config.json
     P->>G: GET user、projects、merge_requests；git fetch main
-    G-->>P: 身份、MR 版本、CI 与 Git 对象
+    G-->>P: 身份、MR 版本和 CI
     Note over P: 读取本地规则、原生 Skill，保存 requestId 与 policyHash
     P->>H: POST /v1/events（source token，mr.review.PROJECT_ID）
     H-->>P: event、duplicate、routed
@@ -104,7 +104,7 @@ sequenceDiagram
     W->>R: gitlab agent：review --config gitlab/config.json
     R->>G: 复核身份、MR 与 main；获取缺少的对象
     alt 请求、策略与 Job prompt 匹配
-        Note over R: Codex 在 main 工作树直接读取 MR Git 对象；报告及证据写入 dataRoot
+        Note over R: Codex 在 main 工作树自行读取 MR 链接；报告及证据写入 dataRoot
         R-->>W: findings 通知与人工发布 ask
         W->>H: POST /v1/runs/RUN/result
         C->>H: GET /v1/cards/next
@@ -200,9 +200,9 @@ sequenceDiagram
 
 ### 仓库内直接审查
 
-用户确认去掉整库文字快照，不设置仓库大小上限。可信 main 工作树仍由 trustedRules 准备；objects.ts 验证 base/start/head 的十六进制 SHA，缺失时从可信 origin 获取 Git 对象，失败直接抛错。run.ts 仅保存 MR 上下文 JSON（schema、gitDir、projectId、mrIid、title、description、baseSha、startSha、headSha），不生成 files/、index.json 或 changes.txt。
+用户确认只需要：准备审查目录，启动原生 Codex，发送配置 prompt 和 MR 链接。插件不下载 versions/diffs、不准备 MR Git 对象、不保存 MR 上下文副本。Codex 自行通过原生工具和 Skill 读取 MR，遵循本轮 head，不检出或执行 MR。模型输出的 complete、executionIssue、findings 保持原约定。
 
-Codex 仍使用原生配置及 Skill，在该 main 工作树通过 `codex exec --json --output-schema ... -o ... -` 执行审查，直接使用固定 Git 对象比较指定 base/head、按需读取文件，不检出 MR。模型结果仍为 complete、executionIssue、findings；资源或必需能力不足时报告执行失败。prompt 不包含 MR 标题、描述或正文，只包含可信规则及资料位置。报告、审计、卡片和发布前复核的协议不变；policyHash 标识更新使旧读取方式的报告和批准失效，不迁移历史事实。
+发布统一使用普通 Discussion，文件和行号保留在正文。版本、CI、策略与授权仍在发布前后核对；旧的行内清单和审查报告不混用，策略为 native-mr-url-v5。Mac 与远端 Worker 使用相同实现。
 
 ### EK001 自动检查与人工审批分开判断
 
@@ -288,7 +288,7 @@ Linux 可复用 [host/service.ts](../../host/service.ts) 的 systemd 用户服�
 |---|---|---|---|
 | 远程领活与人工回答回到原 Worker | L1 | tests/gitlab-integration.test.ts 与 tests/worker.test.ts：Hub 与 Worker 使用独立临时 HOME | 目标 worker 收到 scan/review，answers-only 从服务器报告恢复；保留 run、worker 与请求记录路径 |
 | 扫描与审查使用同一依据 | L1 | tests/gitlab-native.test.ts、tests/gitlab-instructions.test.ts；tests/gitlab-integration.test.ts 双 HOME 场景 | 改服务器 Skill 或 prompt 会使旧依据失效；Mac 不需要目标仓库缓存；保留测试名与退出码 |
-| 只读 Git 对象及目录安全 | L1 | tests/gitlab-objects.test.ts、tests/gitlab-worktree.test.ts、tests/gitlab-integration.test.ts | MR 指令不作为规则；脏审查目录拒绝覆盖；开发目录无变化；保留测试断言与退出码 |
+| 只读 Git 对象及目录安全 | L1 | tests/gitlab-manifest.test.ts、tests/gitlab-worktree.test.ts、tests/gitlab-integration.test.ts | MR 指令不作为规则；脏审查目录拒绝覆盖；开发目录无变化；保留测试断言与退出码 |
 | 人工确认后才发布且旧批准失效 | L1 | tests/gitlab-review.test.ts、tests/gitlab-publish.test.ts、tests/gitlab-answer.test.ts | 使用假 GitLab；确认前无写入，版本变化不发布，响应丢失不重复发；保留请求日志 |
 | 断网、重启与结果恢复 | L1 | tests/worker.test.ts；tests/worker.test.ts 双进程 Hub 断开场景 | 结果在服务器落盘，重连不重做业务；保留 run ID、调用计数和回执 |
 | 停止进程组与 capacity=1 | L1 | tests/worker.test.ts | 子进程全部结束后上报取消，扫描与审查最多一轮执行；保留测试名与退出码 |
@@ -319,6 +319,6 @@ Linux 可复用 [host/service.ts](../../host/service.ts) 的 systemd 用户服�
 | 通道与评论 | Mac 原飞书通道已送达确认卡 #16，delivery 有 ref 且 error=null；服务器无通道。GitLab 写入动作记录为 0，未代替用户回答 |
 | 单一归属与回退前提 | EK001 是新增接入，接入前 Mac 没有该项目，因此既有项目迁移/回退场景不适用；已实测两端规则一致、仅一条 scan、均派给 ek001-139；删去新增路由可还原接入前配置，未干扰待确认卡做真实回退 |
 
-已采用的简化是删除整库文字转换：objects.ts 只准备固定 base/start/head 的 Git 对象，run.ts 传入 Git 目录和版本 JSON，Codex 在可信 main 工作树中按需读取完整对象。保留 MR 指令隔离和原有结构化报告接口，不检出或运行 MR。取消原 128 MiB 总量限制；磁盘、对象读取或模型运行不足时按实际失败处理，不截断。策略标识升级至 native-git-objects-v4，旧报告和批准不混用。Mac 和 Linux 部署相同实现。
+上述真实实测记录对应早期 Git 对象方案，仅保留历史证据。当前实现按用户后续裁决改为 prompt + MR 链接，不再预处理 MR 内容；实际切换记录以本次交付为准。
 
 部署前的逐次探查、已删除 worktree 的完整提交、配置备份和预检记录保存在本人私有部署目录，不包含在仓库。模型真实报告已验证，日常扫描已启用；最终安装来源与远端 CI 由交付报告记录。真实评论写入未验收，保留人工批准边界。
