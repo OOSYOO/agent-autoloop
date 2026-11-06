@@ -9,12 +9,11 @@ async function main() {
   const { readFileSync, existsSync } = await import("node:fs");
   const { HOME, RULES_FILE } = await import("../../host/home.ts");
   const { loadInstructions } = await import("./instructions.ts");
-  const { nativeBasis } = await import("./native.ts");
   const { join } = await import("node:path");
   const { loadConfig, policyHash } = await import("./config.ts");
   const { hash, atomicFile, canonical } = await import("./storage.ts");
   const { GitLab, TemporaryError } = await import("./api.ts");
-  const { trustedRules, verifyProjectRemote } = await import("./trusted-rules.ts");
+  const { verifyProjectRemote } = await import("./trusted-rules.ts");
   const { scanProject } = await import("./scan.ts");
   const { manualTarget } = await import("./manual.ts");
   const { nextObservation, saveRequest, latestRequest } = await import("./request.ts");
@@ -49,10 +48,8 @@ async function main() {
   for (const project of config.projects) {
     try {
       const metadata = await verifyProjectRemote(gl, project);
-      const rules = trustedRules(project);
       const instructions = loadInstructions(argv[1], project.id, HOME, RULES_FILE);
-      const native = await nativeBasis(config.codexPath, rules.worktree, instructions.prompt);
-      const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
+      const instructionsDigest = hash(instructions.prompt);
       if (mrUrl) {
         let iid: number;
         try {
@@ -64,7 +61,7 @@ async function main() {
         const mr = (await gl.get(`projects/${project.id}/merge_requests/${iid}`)) as any;
         if (!(await eligibleForReview(gl, project, mr, config.reviewerId, overrides)))
           throw new Error("MR 未满足审查条件");
-        const digest = policyHash(config, project, instructionsDigest, rules.digest);
+        const digest = policyHash(config, project, instructionsDigest);
         const file = join(config.dataRoot, "gitlab", "requests", `${project.id}`, `${iid}.json`);
         const previous = latestRequest(join(config.dataRoot, "gitlab"), project.id, iid);
         const value = {
@@ -143,7 +140,7 @@ async function main() {
         if (!Number.isSafeInteger(iid) || (iid as number) <= 0) throw new Error("MR 编号无效");
         mrs.push(await gl.get(`projects/${project.id}/merge_requests/${iid}`));
       }
-      const digest = policyHash(config, project, instructionsDigest, rules.digest);
+      const digest = policyHash(config, project, instructionsDigest);
       const directory = join(config.dataRoot, "gitlab", "requests", `${project.id}`);
       await scanProject(config, project, metadata.path_with_namespace, digest, {
         retryUnrouted,

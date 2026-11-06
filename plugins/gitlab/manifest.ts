@@ -53,3 +53,28 @@ export function severityManifests(
     manual: { ...make(findings.filter((f) => f.severity === "P2")), mode: "severity-manual" as const },
   };
 }
+
+export function severityItemsMatch(
+  instanceKey: string,
+  projectId: number,
+  mrIid: number,
+  reportHash: string,
+  policyHash: string,
+  refs: Refs,
+  findings: Finding[],
+  items: unknown[],
+  mode: "manual" | "auto",
+): boolean {
+  const expected = manifest(
+    instanceKey,
+    projectId,
+    mrIid,
+    reportHash,
+    policyHash,
+    refs,
+    findings.filter((f) => (mode === "manual" ? f.severity === "P2" : f.severity === "P0" || f.severity === "P1")),
+  );
+  const allowed = new Set(expected.items.map((item) => canonical(item)));
+  const actual = items.map((item) => canonical(item));
+  return actual.length > 0 && new Set(actual).size === actual.length && actual.every((item) => allowed.has(item));
+}

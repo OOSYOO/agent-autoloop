@@ -1,7 +1,16 @@
 // Failure modes: a remote report cannot resume from an answer, or a stale server rule copy accepts a Hub job.
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+  chmodSync,
+  readdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -81,7 +90,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(versionFile, JSON.stringify({ ...version, diffs: [{ ...version.diffs[0], too_large: true }] }));
     writeFileSync(
       glab,
-      `#!/usr/bin/env node\nconst fs=require('fs'),p=process.argv[3],a=process.argv;if(a.includes('POST')) {if(process.env.TEST_POST_FAIL){process.stdout.write('HTTP/1.1 400 Bad Request\\r\\n\\r\\n{}');process.exit(1)}let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const b=JSON.parse(s);fs.appendFileSync(${JSON.stringify(join(root, "posts.log"))},JSON.stringify(b)+'\\n');if(process.env.TEST_CHANGE_RULES)require('child_process').execFileSync('git',['--git-dir',${JSON.stringify(bare)},'update-ref','refs/heads/main',process.env.TEST_CHANGE_RULES]);process.stdout.write('HTTP/1.1 201 Created\\r\\nContent-Type: application/json\\r\\n\\r\\n'+JSON.stringify({id:'d',notes:[{id:3,position:b.position}]}));});}else {if(p.includes('/versions')){fs.writeFileSync(${JSON.stringify(join(root, "unexpected-versions"))},'called');process.exit(9)}const current=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));const checks=fs.existsSync(${JSON.stringify(join(root, "checks-state.json"))})?JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "checks-state.json"))})):{};let v=p.includes('/pipelines/10/jobs?')?[{id:101,name:'build',status:checks.job||'success',commit:{id:current.sha},pipeline:{id:10}}]:p.includes('/pipelines/10/bridges?')?[{id:102,name:'board',status:'success',commit:{id:current.sha},pipeline:{id:10},downstream_pipeline:{id:11,project_id:42,sha:current.sha}}]:p.endsWith('/pipelines/11')?{id:11,project_id:42,sha:current.sha,status:checks.child||'success'}:p==='user'?{id:8}:p==='projects/42'?{id:42,path_with_namespace:'team/app',ssh_url_to_repo:${JSON.stringify(bare)}}:p.includes('/discussions?')?(process.env.TEST_OLD?[{notes:[{author:{id:8},body:'<!-- agent-autoloop:action='+('d'.repeat(64))+' -->',position:{head_sha:'e'.repeat(40)}}]}]:[]):p.includes('/versions/1')?JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)})):p.includes('/versions?')?[JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)}))]:JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));console.log(JSON.stringify(v));}`,
+      `#!/usr/bin/env node\nconst fs=require('fs'),p=process.argv[3],a=process.argv;if(a.includes('POST')) {if(process.env.TEST_POST_FAIL){process.stdout.write('HTTP/1.1 400 Bad Request\\r\\n\\r\\n{}');process.exit(1)}let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const b=JSON.parse(s);fs.appendFileSync(${JSON.stringify(join(root, "posts.log"))},JSON.stringify(b)+'\\n');if(process.env.TEST_PUBLICATION){const f=${JSON.stringify(join(root, "config.json"))},c=JSON.parse(fs.readFileSync(f));c.projects[0].publication=process.env.TEST_PUBLICATION;fs.writeFileSync(f,JSON.stringify(c));}if(process.env.TEST_CHANGE_RULES)require('child_process').execFileSync('git',['--git-dir',${JSON.stringify(bare)},'update-ref','refs/heads/main',process.env.TEST_CHANGE_RULES]);process.stdout.write('HTTP/1.1 201 Created\\r\\nContent-Type: application/json\\r\\n\\r\\n'+JSON.stringify({id:'d',notes:[{id:3,position:b.position}]}));});}else {if(p.includes('/versions')){fs.writeFileSync(${JSON.stringify(join(root, "unexpected-versions"))},'called');process.exit(9)}const current=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));const checks=fs.existsSync(${JSON.stringify(join(root, "checks-state.json"))})?JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "checks-state.json"))})):{};let v=p.includes('/pipelines/10/jobs?')?[{id:101,name:'build',status:checks.job||'success',commit:{id:current.sha},pipeline:{id:10}}]:p.includes('/pipelines/10/bridges?')?[{id:102,name:'board',status:'success',commit:{id:current.sha},pipeline:{id:10},downstream_pipeline:{id:11,project_id:42,sha:current.sha}}]:p.endsWith('/pipelines/11')?{id:11,project_id:42,sha:current.sha,status:checks.child||'success'}:p==='user'?{id:8}:p==='projects/42'?{id:42,path_with_namespace:'team/app',ssh_url_to_repo:${JSON.stringify(bare)}}:p.includes('/discussions?')?(process.env.TEST_OLD?[{notes:[{author:{id:8},body:'<!-- agent-autoloop:action='+('d'.repeat(64))+' -->',position:{head_sha:'e'.repeat(40)}}]}]:[]):p.includes('/versions/1')?JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)})):p.includes('/versions?')?[JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)}))]:JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));console.log(JSON.stringify(v));}`,
       { mode: 0o700 },
     );
     const report = {
@@ -149,7 +158,13 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     };
     const dir = join(root, "gitlab", "requests", "42");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "7.json"), JSON.stringify(req));
+    saveRequest(join(root, "gitlab"), {
+      ...req,
+      schema: 1 as const,
+      origin: "auto" as const,
+      instanceKey: "work",
+      eligible: true,
+    });
     const rulesPath = join(root, "rules.json");
     writeFileSync(
       rulesPath,
@@ -236,8 +251,9 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       },
     );
-    assert.equal(staleServer.status, 1);
-    assert.match(staleServer.stderr, /运行规则与当前可信审查规则不一致/);
+    assert.equal(staleServer.status, 0, staleServer.stderr);
+    assert.match(staleServer.stdout, /确认发布审查评论/);
+    rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     assert.equal(existsSync(join(root, "posts.log")), false);
     assert.equal(existsSync(join(hubHome, "cache.git")), false);
     assert.equal(existsSync(join(hubHome, "gitlab")), false);
@@ -259,9 +275,9 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       },
     );
-    assert.equal(changedDuringRun.status, 1);
-    assert.match(changedDuringRun.stderr, /审查配置已经变化/);
-    assert.doesNotMatch(changedDuringRun.stdout, /确认发布审查评论/);
+    assert.equal(changedDuringRun.status, 0, changedDuringRun.stderr);
+    assert.match(changedDuringRun.stdout, /确认发布审查评论/);
+    rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     writeFileSync(rulesPath, originalRulesForRace);
     const originalSkill = readFileSync(join(skillDir, "SKILL.md"), "utf8");
     writeFileSync(join(root, "change-skill"), "1");
@@ -280,9 +296,9 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       },
     );
-    assert.equal(changedSkillRun.status, 1);
-    assert.match(changedSkillRun.stderr, /审查配置已经变化/);
-    assert.doesNotMatch(changedSkillRun.stdout, /确认发布审查评论/);
+    assert.equal(changedSkillRun.status, 0, changedSkillRun.stderr);
+    assert.match(changedSkillRun.stdout, /确认发布审查评论/);
+    rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     writeFileSync(join(skillDir, "SKILL.md"), originalSkill);
     writeFileSync(join(root, "change-mr"), "1");
     const changedMrRun = spawnSync(
@@ -301,7 +317,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.equal(changedMrRun.status, 0, changedMrRun.stderr);
-    assert.match(changedMrRun.stdout, /MR 版本或审查条件已变化/);
+    assert.match(changedMrRun.stdout, /MR 版本已变化/);
     assert.doesNotMatch(changedMrRun.stdout, /确认发布审查评论/);
     assert.equal(existsSync(join(root, "posts.log")), false);
     writeFileSync(mrFile, JSON.stringify(mr));
@@ -322,10 +338,11 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       },
     );
-    assert.equal(changedEligibility.status, 0, changedEligibility.stderr);
-    assert.match(changedEligibility.stdout, /MR 版本或审查条件已变化/);
+    assert.notEqual(changedEligibility.status, 0);
     assert.doesNotMatch(changedEligibility.stdout, /确认发布审查评论/);
+    assert.ok(readdirSync(join(root, "gitlab", "reports")).length > 0, "completed report survives eligibility loss");
     writeFileSync(mrFile, JSON.stringify(mr));
+    chmodSync(codex, 0o000);
     const child = spawnSync(
       process.execPath,
       [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
@@ -341,6 +358,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       },
     );
+    chmodSync(codex, 0o700);
     assert.equal(child.status, 0, child.stderr);
     const result = resultFrom(readMessage(child.stdout), {});
     assert.equal(result.problem, undefined, child.stdout);
@@ -385,8 +403,8 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.equal(stalePrompt.status, 0, stalePrompt.stderr);
-    assert.match(stalePrompt.stdout, /版本或策略已变化，未发布/);
-    assert.equal(existsSync(join(root, "posts.log")), false);
+    assert.match(stalePrompt.stdout, /审查评论已发布/);
+    assert.equal(readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length, 1);
     writeFileSync(rulesPath, originalRules);
     const changedRulesCommit = execFileSync(
       "git",
@@ -420,8 +438,8 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.equal(blocked.status, 0);
-    assert.match(blocked.stdout, /版本或策略已变化，未发布/);
-    assert.equal(existsSync(join(root, "posts.log")), false);
+    assert.match(blocked.stdout, /审查评论已发布/);
+    assert.equal(readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length, 1);
     execFileSync("git", ["--git-dir", bare, "update-ref", "refs/heads/main", trustedCommit]);
     const resumed = spawnSync(
       process.execPath,
@@ -495,7 +513,13 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     assert.match(mixed.stdout, /审查评论已发布/);
     const newerHead = tree(blob("newer\n"));
     const newerReq = { ...req, requestId: "f".repeat(64), headSha: newerHead, observation: 2 };
-    writeFileSync(join(dir, "7.json"), JSON.stringify(newerReq));
+    saveRequest(join(root, "gitlab"), {
+      ...newerReq,
+      schema: 1 as const,
+      origin: "auto" as const,
+      instanceKey: "work",
+      eligible: true,
+    });
     writeFileSync(
       mrFile,
       JSON.stringify({
@@ -548,6 +572,53 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     assert.ok(
       changedResult.result.ask?.some((item) => item.title === "确认发布审查评论"),
       changed.stdout,
+    );
+    const duplicateRequest = { ...newerReq, requestId: "7".repeat(64), observation: 18 };
+    saveRequest(join(root, "gitlab"), {
+      ...duplicateRequest,
+      schema: 1 as const,
+      origin: "auto" as const,
+      instanceKey: "work",
+      eligible: true,
+    });
+    writeFileSync(
+      context,
+      JSON.stringify({
+        events: [
+          {
+            id: `gitlab:${duplicateRequest.requestId}`,
+            source: "gitlab",
+            type: "mr.review.42",
+            subject: "work/42/7",
+            detail: JSON.stringify(duplicateRequest),
+          },
+        ],
+        answers: [],
+      }),
+    );
+    chmodSync(codex, 0o000);
+    const duplicate = spawnSync(
+      process.execPath,
+      [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: root,
+          AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
+          AGENT_AUTOLOOP_CONTEXT: context,
+          AGENT_AUTOLOOP_RUN: "18",
+        },
+      },
+    );
+    chmodSync(codex, 0o700);
+    assert.equal(duplicate.status, 0, duplicate.stderr);
+    const duplicateAsk = resultFrom(readMessage(duplicate.stdout), {}).result.ask?.[0];
+    assert.equal(
+      duplicateAsk?.key,
+      changedResult.result.ask?.[0].key,
+      "same report without overrides uses the same card key",
     );
     const manualReq = { ...newerReq, requestId: "1".repeat(64), observation: 3, origin: "manual" as const };
     const localBase = {
@@ -607,6 +678,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       },
     );
+    assert.equal(manual.status, 0, manual.stderr);
     const manualResult = resultFrom(readMessage(manual.stdout), {});
     assert.equal(manualResult.problem, undefined, manual.stdout);
     const manualAsk = manualResult.result.ask?.find((item) => item.title === "确认发布审查评论");
@@ -614,7 +686,8 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     const manifestHash = JSON.parse(manualAsk.about!).manifestHash;
     const manifest = loadArtifact(join(root, "gitlab"), "manifests", manifestHash) as any;
     const storedReport = loadArtifact(join(root, "gitlab"), "reports", manifest.reportHash) as any;
-    assert.equal(storedReport.requestId, manualReq.requestId);
+    assert.equal(storedReport.requestId, newerReq.requestId);
+    assert.equal(manifest.requestId, manualReq.requestId);
     writeFileSync(
       context,
       JSON.stringify({
@@ -633,6 +706,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         ],
       }),
     );
+    writeFileSync(file, JSON.stringify({ ...raw, projects: [{ ...raw.projects[0], publication: "severity" }] }));
     const manualAnswer = spawnSync(
       process.execPath,
       [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
@@ -891,12 +965,11 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         TEST_CHANGE_RULES: changedRulesCommit,
       },
     });
-    assert.equal(race.status, 1);
-    assert.match(race.stderr, /评论已发到旧版本|版本或审查策略已变化|审查配置已经变化/);
+    assert.equal(race.status, 0, race.stderr);
     assert.equal(
       readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length,
-      4,
-      "only first of two items may post",
+      5,
+      "main changes do not prevent the second approved comment",
     );
     // A human approval job may cancel the parent while required jobs and the child have passed.
     const checksRaw = {
@@ -952,6 +1025,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
           AGENT_AUTOLOOP_RUN: "19",
         },
       });
+    rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     const checked = executeChecks();
     assert.equal(checked.status, 0, checked.stderr);
     const checkedAsk = resultFrom(readMessage(checked.stdout), {}).result.ask?.[0];
@@ -978,7 +1052,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(join(root, "checks-state.json"), JSON.stringify({ child: "failed" }));
     const noLongerPassed = executeChecks();
     assert.equal(noLongerPassed.status, 0, noLongerPassed.stderr);
-    assert.match(noLongerPassed.stdout, /版本或策略已变化，未发布/);
+    assert.match(noLongerPassed.stdout, /MR 状态或发布权限已变化，未发布/);
     assert.equal(readFileSync(join(root, "posts.log"), "utf8"), postsBeforeChecks);
     rmSync(join(root, "checks-state.json"));
     const severityRaw = { ...raw, projects: [{ ...raw.projects[0], publication: "severity" }] };
@@ -1141,6 +1215,76 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         assert.equal(approvedPosts.length, afterPosts.length + 1);
         assert.match(JSON.parse(approvedPosts.at(-1)!).body, /^\[P2\]/);
       }
+    }
+    for (const target of ["manual", "severity"] as const) {
+      const headForRevoke = tree(blob(`revoke-${target}\n`));
+      const revokeRaw = { ...raw, projects: [{ ...raw.projects[0], publication: "auto" }] };
+      writeFileSync(file, JSON.stringify(revokeRaw));
+      const revokeRequest = {
+        ...req,
+        requestId: (target === "manual" ? "c" : "d").repeat(64),
+        observation: observation++,
+        headSha: headForRevoke,
+      };
+      saveRequest(join(root, "gitlab"), {
+        ...revokeRequest,
+        schema: 1 as const,
+        origin: "auto" as const,
+        instanceKey: "work",
+        eligible: true,
+      });
+      writeFileSync(
+        mrFile,
+        JSON.stringify({ ...mr, sha: headForRevoke, head_pipeline: { sha: headForRevoke, status: "success" } }),
+      );
+      writeFileSync(
+        reportFile,
+        JSON.stringify({
+          ...report,
+          findings: [
+            { ...report.findings[0], title: `first-${target}` },
+            { ...report.findings[0], title: `second-${target}` },
+          ],
+        }),
+      );
+      writeFileSync(
+        context,
+        JSON.stringify({
+          events: [
+            {
+              id: `gitlab:${revokeRequest.requestId}`,
+              source: "gitlab",
+              type: "mr.review.42",
+              subject: "work/42/7",
+              detail: JSON.stringify(revokeRequest),
+            },
+          ],
+          answers: [],
+        }),
+      );
+      const count = readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length;
+      const revoked = spawnSync(
+        process.execPath,
+        [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: root,
+            AGENT_AUTOLOOP_HOME: root,
+            AGENT_AUTOLOOP_RULES: rulesPath,
+            AGENT_AUTOLOOP_CONTEXT: context,
+            AGENT_AUTOLOOP_RUN: "60",
+            TEST_PUBLICATION: target,
+          },
+        },
+      );
+      assert.notEqual(revoked.status, 0);
+      assert.equal(
+        readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length,
+        count + 1,
+        `automatic publication stopped after changing to ${target}`,
+      );
     }
     assert.equal(existsSync(join(root, "unexpected-versions")), false);
   } finally {

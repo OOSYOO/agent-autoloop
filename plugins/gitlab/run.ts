@@ -14,8 +14,7 @@ import { trustedRules, verifyProjectRemote } from "./trusted-rules.ts";
 import { manualOverrides } from "./manual.ts";
 import { findingsPages } from "./presentation.ts";
 import { answerOutcome } from "./outcome.ts";
-import { HOME, RULES_FILE } from "../../host/home.ts";
-import { loadInstructions, checkJobRule } from "./instructions.ts";
+import { jobInstructions } from "./instructions.ts";
 import { nativeBasis } from "./native.ts";
 import { resumeAnswer, resumeAutomatic, resumeSaved } from "./resume.ts";
 import type { Job } from "../../protocol/job.ts";
@@ -90,18 +89,13 @@ async function main() {
     project = config.projects.find((p) => p.id === first.projectId);
   if (!project || parsed.some((r) => r.projectId !== first.projectId || r.mrIid !== first.mrIid))
     throw new Error("请求项目或事项不一致");
-  const instructions = loadInstructions(args[1], project.id, HOME, RULES_FILE);
-  checkJobRule(process.env.AGENT_AUTOLOOP_CONTEXT!, instructions);
+  const instructions = jobInstructions(process.env.AGENT_AUTOLOOP_CONTEXT!);
   const gl = new GitLab(config.glabPath, config.instanceUrl);
   await verifyProjectRemote(gl, project);
-  const trusted = trustedRules(project);
-  const native = await nativeBasis(config.codexPath, trusted.worktree, instructions.prompt);
-  const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
-  const policy = policyHash(config, project, instructionsDigest, trusted.digest);
   const user = (await gl.get("user")) as { id: number };
   if (user?.id !== config.reviewerId) throw new Error("GitLab 登录身份与配置不符");
   const mr = (await gl.get(`projects/${project.id}/merge_requests/${first.mrIid}`)) as any;
-  resolves.push(...obsoleteCards(context.open ?? [], project.id, first.mrIid, mr.sha, policy));
+  resolves.push(...obsoleteCards(context.open ?? [], project.id, first.mrIid, mr.sha));
   const records = readRequests(join(config.dataRoot, "gitlab"), project.id, first.mrIid);
   const local: Request[] = records.map((stored) => ({
     schema: 1,
@@ -113,7 +107,7 @@ async function main() {
     observation: stored.observation,
     origin: stored.origin === "manual" ? "manual" : "auto",
   }));
-  const selected = selectRequest(events, local, mr.sha, policy, project.id, first.mrIid);
+  const selected = selectRequest(events, local, mr.sha, project.id, first.mrIid);
   if (!selected) {
     summary = "没事可做：请求版本已过期";
     return;
@@ -125,10 +119,15 @@ async function main() {
   const refs = { head_sha: selected.headSha };
   const mrUrl = `${config.instanceUrl}/${project.projectPath}/-/merge_requests/${selected.mrIid}`;
   const root = join(config.dataRoot, "gitlab");
-  const cached = completedReport(root, project.id, selected.mrIid, selected.headSha, policy);
+  const cached = completedReport(root, project.id, selected.mrIid, selected.headSha);
   let report: any, modelReport, audit: string | undefined;
-  if (cached && cached.value.instructionsDigest === instructionsDigest && cached.value.model === config.model) {
+  if (cached) {
     report = cached.value;
+    if (
+      (report.instanceUrl !== undefined && report.instanceUrl !== config.instanceUrl) ||
+      (report.projectPath !== undefined && report.projectPath !== project.projectPath)
+    )
+      throw new Error("报告项目身份不一致");
     modelReport = parseModelReport(
       JSON.stringify({
         complete: report.complete,
@@ -136,9 +135,11 @@ async function main() {
         findings: report.findings,
       }),
     );
-    if (report.requestId !== selected.requestId)
-      report = { ...report, requestId: selected.requestId, runId, createdAt: new Date().toISOString() };
   } else {
+    const trusted = trustedRules(project);
+    const native = await nativeBasis(config.codexPath, trusted.worktree, instructions.prompt);
+    const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
+    const policy = policyHash(config, project, instructionsDigest, trusted.digest);
     const rulesEvidence = { branch: trusted.branch, commit: trusted.commit, digest: trusted.digest };
     const dir = mkdtempSync(join(config.dataRoot, "gitlab-review-"));
     try {
@@ -160,9 +161,11 @@ async function main() {
       schema: 1,
       requestId: selected.requestId,
       projectId: selected.projectId,
+      instanceUrl: config.instanceUrl,
+      projectPath: project.projectPath,
       mrIid: selected.mrIid,
       headSha: selected.headSha,
-      policyHash: selected.policyHash,
+      policyHash: policy,
       model: config.model,
       instructionsDigest,
       instructions: {
@@ -181,50 +184,61 @@ async function main() {
       createdAt: new Date().toISOString(),
     };
   }
+  if (Buffer.byteLength(canonical(report), "utf8") > 1024 * 1024) throw new Error("完整报告超过大小限制");
+  const reportHash = saveArtifact(root, "reports", report);
   const latestConfig = loadConfig(args[1]);
   const latestProject = latestConfig.projects.find((item) => item.id === project.id);
-  if (!latestProject) throw new Error("审查配置已经变化");
+  if (
+    !latestProject ||
+    latestConfig.instanceKey !== config.instanceKey ||
+    latestConfig.instanceUrl !== config.instanceUrl ||
+    latestProject.projectPath !== project.projectPath
+  )
+    throw new Error("审查项目身份已经变化");
   await verifyProjectRemote(new GitLab(latestConfig.glabPath, latestConfig.instanceUrl), latestProject);
-  const latestInstructions = loadInstructions(args[1], latestProject.id, HOME, RULES_FILE);
-  const latestMain = trustedRules(latestProject);
-  const latestNative = await nativeBasis(latestConfig.codexPath, latestMain.worktree, latestInstructions.prompt);
-  const latestInstructionsDigest = hash(canonical({ prompt: latestInstructions.prompt, native: latestNative.digest }));
-  if (policyHash(latestConfig, latestProject, latestInstructionsDigest, latestMain.digest) !== policy)
-    throw new Error("审查配置已经变化");
   const latestMr = (await new GitLab(latestConfig.glabPath, latestConfig.instanceUrl).get(
     `projects/${project.id}/merge_requests/${selected.mrIid}`,
   )) as any;
+  if (latestMr.sha !== selected.headSha) {
+    summary = "没事可做：MR 版本已变化";
+    return;
+  }
   if (
     !(await eligibleForReview(
       new GitLab(latestConfig.glabPath, latestConfig.instanceUrl),
       latestProject,
       latestMr,
       latestConfig.reviewerId,
-      overrides,
-    )) ||
-    latestMr.sha !== selected.headSha
-  ) {
-    summary = "没事可做：MR 版本或审查条件已变化";
-    return;
-  }
-  if (Buffer.byteLength(canonical(report), "utf8") > 1024 * 1024) throw new Error("完整报告超过大小限制");
-  const reportHash = saveArtifact(root, "reports", report);
-  if (project.publication === "severity") {
+      selected.origin === "manual" ? manualOverrides(stored, selected.requestId, latestConfig.reviewerId) : [],
+    ))
+  )
+    throw new Error("MR 状态或发布权限已变化，保留报告等待重试");
+  const reportPolicy = report.policyHash as string;
+  const originalRequest = records.find((record) => record.requestId === report.requestId);
+  if (!originalRequest) throw new Error("原审查请求记录缺失");
+  const hasOverrides = (record: typeof originalRequest) =>
+    Array.isArray(record.overrides) && record.overrides.length > 0;
+  const requestBinding =
+    report.requestId !== selected.requestId && (hasOverrides(originalRequest) || (stored && hasOverrides(stored)))
+      ? { requestId: selected.requestId }
+      : {};
+
+  if (latestProject.publication === "severity") {
     const split = severityManifests(
       config.instanceKey,
       project.id,
       selected.mrIid,
       reportHash,
-      policy,
+      reportPolicy,
       refs,
       modelReport.findings,
     );
     if (split.automatic.items.length) {
-      const autoHash = saveArtifact(root, "manifests", split.automatic);
-      const outcome = await resumeAutomatic(config, autoHash, args[1]);
+      const autoHash = saveArtifact(root, "manifests", { ...split.automatic, ...requestBinding });
+      const outcome = await resumeAutomatic(latestConfig, autoHash, args[1]);
       if (outcome !== "sent") {
         if (outcome === "stale") {
-          summary = "没事可做：版本已变化";
+          summary = "没事可做：MR 状态或发布权限已变化";
           return;
         }
         throw new Error(outcome === "unknown" ? "评论发送结果不明，请本人在 GitLab 核查" : "自动发布未完成");
@@ -238,16 +252,16 @@ async function main() {
         reportHash,
         project.id,
         selected.mrIid,
-        policy,
+        reportPolicy,
         visible,
         split.manual.items,
       );
       if (split.manual.items.length) {
-        const manualHash = saveArtifact(root, "manifests", split.manual);
-        const saved = await resumeSaved(config, manualHash, args[1]);
+        const manualHash = saveArtifact(root, "manifests", { ...split.manual, ...requestBinding });
+        const saved = await resumeSaved(latestConfig, manualHash, args[1]);
         if (saved === "unknown" || saved === "sent-stale") throw new Error("评论状态未确认，请本人在 GitLab 核查");
         if (saved === "stale") {
-          summary = "没事可做：版本已变化";
+          summary = "没事可做：MR 状态或发布权限已变化";
           return;
         }
         if (saved === "none") {
@@ -264,7 +278,7 @@ async function main() {
             "确认发布审查评论",
             pages.length === 1
               ? pages[0]
-              : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${policy}，\nMR：${mrUrl}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
+              : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${reportPolicy}，\nMR：${mrUrl}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
             { schema: 1, kind: "publish", manifestHash: manualHash },
             ["发布这份报告中的评论", "不发布"],
           );
@@ -281,22 +295,17 @@ async function main() {
     summary = modelReport.findings.length ? "审查完成" : "0 条 findings，请继续人工 review / 审核";
     return;
   }
-  const value = manifest(
-    config.instanceKey,
-    project.id,
-    selected.mrIid,
-    reportHash,
-    policy,
-    refs,
-    modelReport.findings,
-  );
+  const value = {
+    ...manifest(config.instanceKey, project.id, selected.mrIid, reportHash, reportPolicy, refs, modelReport.findings),
+    ...requestBinding,
+  };
   const pages = findingsPages(
     mrUrl,
     selected.headSha,
     reportHash,
     project.id,
     selected.mrIid,
-    policy,
+    reportPolicy,
     modelReport.findings,
     value.items,
   );
@@ -314,7 +323,7 @@ async function main() {
   const manifestHash = saveArtifact(root, "manifests", value);
   if (canonical(loadArtifact(root, "manifests", manifestHash)) !== canonical(value))
     throw new Error("待发布内容校验失败");
-  const savedOutcome = await resumeSaved(config, manifestHash, args[1]);
+  const savedOutcome = await resumeSaved(latestConfig, manifestHash, args[1]);
   if (savedOutcome === "sent") {
     summary = "审查评论已发布";
     return;
@@ -327,13 +336,13 @@ async function main() {
     if (answerSummary) return;
     throw new Error("评论发送结果不明，请本人在 GitLab 核查");
   }
-  if (savedOutcome === "sent-stale") throw new Error("评论已发到旧版本，请本人处理");
+  if (savedOutcome === "sent-stale") throw new Error("评论已发出，MR 状态或发布权限已变化，请本人处理");
   if (savedOutcome === "stale") {
-    summary = "没事可做：版本已变化";
+    summary = "没事可做：MR 状态或发布权限已变化";
     return;
   }
-  if (project.publication === "auto") {
-    const outcome = await resumeAutomatic(config, manifestHash, args[1]);
+  if (latestProject.publication === "auto") {
+    const outcome = await resumeAutomatic(latestConfig, manifestHash, args[1]);
     if (outcome === "sent") {
       summary = "审查评论已发布";
       return;
@@ -343,9 +352,9 @@ async function main() {
       return;
     }
     if (outcome === "unknown") throw new Error("评论发送结果不明，请本人在 GitLab 核查");
-    if (outcome === "sent-stale") throw new Error("评论已发到旧版本，请本人处理");
+    if (outcome === "sent-stale") throw new Error("评论已发出，MR 状态或发布权限已变化，请本人处理");
     if (outcome === "stale") {
-      summary = "没事可做：版本已变化";
+      summary = "没事可做：MR 状态或发布权限已变化";
       return;
     }
     if (outcome !== "comparison") throw new Error("自动发布未完成");
@@ -363,7 +372,7 @@ async function main() {
     "确认发布审查评论",
     pages.length === 1
       ? pages[0]
-      : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${policy}，\nMR：${mrUrl}\n版本：${selected.headSha}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
+      : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${reportPolicy}，\nMR：${mrUrl}\n版本：${selected.headSha}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
     { schema: 1, kind: "publish", manifestHash },
     ["发布这份报告中的评论", "不发布"],
   );

@@ -27,7 +27,6 @@ export function completedReport(
   projectId: number,
   mrIid: number,
   headSha: string,
-  policyHash: string,
 ): { hash: string; value: any } | null {
   let names: string[];
   try {
@@ -36,6 +35,7 @@ export function completedReport(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+  let newest: { hash: string; value: any } | null = null;
   for (const name of names.sort()) {
     if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
     const digest = name.slice(0, 64);
@@ -44,10 +44,10 @@ export function completedReport(
       value.status === "reviewed" &&
       value.projectId === projectId &&
       value.mrIid === mrIid &&
-      value.headSha === headSha &&
-      value.policyHash === policyHash
+      value.headSha === headSha
     )
-      return { hash: digest, value };
+      if (!newest || String(value.createdAt ?? "") > String(newest.value.createdAt ?? ""))
+        newest = { hash: digest, value };
   }
-  return null;
+  return newest;
 }

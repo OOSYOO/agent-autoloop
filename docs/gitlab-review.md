@@ -56,7 +56,7 @@ GitLab 扩展运行在接单程序所在的 Mac 或 Linux。它使用现有的�
 }
 ```
 
-GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub 的规则快照。Codex 在专用工作树原生发现适用规则和 Skill；不维护独立 Skill 名单或逐文件规则白名单。扫描与发布前用 Codex 的原生 catalog、有效配置摘要、Skill 文件内容与 main commit 计算策略摘要；任一依据变化使旧报告和批准失效，历史记录保留。扫描和检查不调用模型。不可缺少的 Skill 或能力不可用时报告执行失败，不能冒充零 findings。
+GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub 的规则快照。Codex 在专用工作树原生发现适用规则和 Skill；不维护独立 Skill 名单或逐文件规则白名单。审查开始时记录 Codex 的原生 catalog、指令相关配置、Skill 文件内容与 main commit 的审计摘要；这些信息只保留为本轮审计，不因它们变化重新审查或废弃同一 head 的批准，历史记录保留。扫描和检查不调用模型。不可缺少的 Skill 或能力不可用时报告执行失败，不能冒充零 findings。
 
 旧 GitLab 配置中的 `skill`、`skillPath` 和 `projects[].rules` 以及 GitLab 路由的 `rule.skill` 均不兼容，需移除；其他 Agent 的通用 `rule.skill` 不变。Codex 使用本机原生配置和 Skill 发现。只读审查、不执行 MR 代码、测试或 hooks、不发布是本轮任务要求；不声称插件额外隔离了 MCP、网络或用户配置，也不声称 Skill 的每一步均已执行。
 
@@ -79,7 +79,7 @@ GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
 
 
 ## 远程 Worker
@@ -101,7 +101,7 @@ GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发�
 5. 共用服务器将 Node 24 独立解压到本实例私有目录，用绝对路径执行 `<实例>/app/bin/agent-autoloop.ts`，再执行 service install；服务会固定实际 Node 路径。默认 `<实例>/bin/agent-autoloop` 使用 PATH 中的 node，不保证使用私有版本。GitLab 配置也填 Codex/glab 的绝对路径。不要切换已有 Node 的默认版本、修改 shell profile、全局安装包或覆盖其他工具。
 6. 独立安装目录不提供账号级权限隔离；需要隔离时使用专用账号并单独登录。Linux 用户服务的退出登录保活须实际验证；开启 linger 会影响该账号全部用户服务的生命周期。Worker capacity 仅限制任务数，不是 CPU、内存或磁盘配额。裸缓存、完整 main 工作树和报告须有足够持久空间，tmpfs 不适合保存恢复记录。
 
-先执行两端 check、服务器 gitlab check，再核实 Worker 在线及一次授权测试 MR 的真实报告。切换已有项目或回退时，先停该项目扫描并收尾旧轮次、待确认卡和结果不明的评论；保留旧报告，不搬用旧批准或正在运行的 worker/runs，不同时开两端扫描入口。人工批准仍回到原 Worker 的报告目录，配置或版本变化使旧批准失效。
+先执行两端 check、服务器 gitlab check，再核实 Worker 在线及一次授权测试 MR 的真实报告。切换已有项目或回退时，先停该项目扫描并收尾旧轮次、待确认卡和结果不明的评论；保留旧报告，不搬用旧批准或正在运行的 worker/runs，不同时开两端扫描入口。人工批准仍回到原 Worker 的报告目录，MR head 变化使旧版本批准失效，其他配置变化不触发重审；发布仍检查当前授权与准入。
 
 
 ### 按自动检查判断审查时机
@@ -120,10 +120,10 @@ GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发�
 
 每项指定 job 必须是当前 MR head_pipeline 下、同 head SHA 的唯一当前尝试，状态必须为 success；failed、canceled、skipped、manual、未完成及缺失都不通过。指定 bridge 除自身成功，还要求关联的同项目子流水线实际成功且 SHA 一致，不能把触发成功当作测试完成。即使设置 allow_failure，列入此配置的检查也必须成功。人工审批等未列入的 job 不阻止开始审查，不改变项目本身的审批或合并要求。
 
-扫描、审查开始和完成、人工回答续办及每条评论发布前使用同一判断，并重读 MR 核对 pipeline ID 与 head。配置名称进入策略摘要，变更后旧批准失效。先升级插件再启用此模式；它不修改项目 CI 文件、不启动 job、不合并 MR。checks 模式以外不能配置 ciJobs/ciBridges。
+扫描、审查开始和完成、人工回答续办及每条评论发布前使用同一判断，并重读 MR 核对 pipeline ID 与 head。配置名称保留审计；变更不触发同一 head 重审，发布按当前检查配置核实。先升级插件再启用此模式；它不修改项目 CI 文件、不启动 job、不合并 MR。checks 模式以外不能配置 ciJobs/ciBridges。
 
 
-GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。旧策略报告与批准不复用。
+GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
 
 
 模型完成状态以 `complete` 及原生进程完成记录判断。`complete=true` 时，executionIssue 中合法长度的附带摘要只保留在原始审计，规范化结果将其清空；不因此丢弃已校验的 findings。`complete=false` 仍作为执行失败处理，findings 的结构、路径与大小校验不变。

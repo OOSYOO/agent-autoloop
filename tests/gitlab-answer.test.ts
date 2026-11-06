@@ -71,7 +71,7 @@ test("rejecting an approved report does not require the network or current rule 
   }
 });
 
-test("approval of a legacy report is stale without requiring network", async () => {
+test("approval requires a trusted configuration even for a legacy report", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -103,7 +103,7 @@ test("approval of a legacy report is stale without requiring network", async () 
       text: null,
       about: JSON.stringify({ schema: 1, kind: "publish", manifestHash }),
     };
-    assert.equal(await resumeAnswer({ dataRoot: root, projects: [{ id: 42 }] } as any, value), "stale");
+    await assert.rejects(resumeAnswer({ dataRoot: root, projects: [{ id: 42 }] } as any, value), /缺少可信配置路径/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

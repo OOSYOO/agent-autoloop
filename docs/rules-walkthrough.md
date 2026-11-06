@@ -66,11 +66,11 @@ flowchart TD
 
 来源身份由请求使用的来源密钥确定，不能由事件正文冒充。Hub 用 `when.source: gitlab` 和 `when.types: [mr.review.14]` 匹配规则；事件中没有“执行这个程序”“切换这个目录”之类的权限。
 
-`subject` 区分具体 MR。请求身份还与 Head 和审查策略相关：相同观察不会反复投递，代码或有效策略变化会产生新审查依据。Hub 自身也按来源与事件 ID 去重；业务去重和中台去重各守一层。
+`subject` 区分具体 MR。自动派发按 MR head 去重：同一已投递版本不会因其他条件改变重复投递，只有新 head 才产生新的自动审查。Hub 自身也按来源与事件 ID 去重；业务去重和中台去重各守一层。
 
 匹配后 Hub 记录事件、创建或合并排队的轮次。Worker 执行 run.ts，核对项目和 MR 版本、更新专用 main 工作目录，然后启动原生 Codex，发送可信 prompt 和 MR 链接。Codex 自己按 Skill 读取 MR；插件不下载 Diff 或准备 MR Git 对象、上下文副本。
 
-报告记录本轮 main commit、`rules.prompt`、Codex 原生 Skill catalog 与依据摘要；main commit、指令或相关依据发生变化时，旧报告和批准失效。Codex 在专用工作树按原生机制读取仓库规则与 Skill；完整代码资料和报告留在私有目录，不塞进中台事件。Worker 将事件原文保存为资料，MR 文字不会成为指令。
+报告记录本轮 main commit、`rules.prompt`、Codex 原生 Skill catalog 与依据摘要；只有 MR head 变化才触发新审查；其他依据变化只在下一次新 head 审查时生效。Codex 在专用工作树按原生机制读取仓库规则与 Skill；完整代码资料和报告留在私有目录，不塞进中台事件。Worker 将事件原文保存为资料，MR 文字不会成为指令。
 
 ## rules.json 中各字段的作用
 
@@ -90,7 +90,7 @@ flowchart TD
 | `rule.group` | `gitlab-review` | 多条规则可共用的并发限制组 |
 | `rule.parallel` | 1 | 按 subject 分开事项，同时该组最多一轮执行；不写时该规则合为一条执行线，组默认上限仍为 1 |
 | `rule.tell` | `needed` | 不为每次完成额外通知；仍处理需要人的 ask/notice |
-| `rule.prompt` | 固定中文描述 | 实际审查的唯一可信任务指令；Codex 在专用工作树中原生解析 Skill，指令与依据变更使旧策略失效 |
+| `rule.prompt` | 固定中文描述 | 实际审查的唯一可信任务指令；Codex 在专用工作树中原生解析 Skill，仅在真正的新 head 审查开始时使用当轮可信输入 |
 
 扫描与审查是两个 group，组限制本身并不让它们互相排斥；当前本机 capacity 为 1，因此仍会串行。审查占用 Worker 时，到点的扫描任务会排队；5 分钟是触发周期，不保证忙碌时每 5 分钟完成一次查询。`parallel` 改大而 capacity 保持 1，也不会让这台机器同时运行多个任务。
 
@@ -102,7 +102,7 @@ flowchart TD
 
 点击卡片后，通道携带选项、回答人身份和消息 ID 提交回答。`kernel/decide.ts` 检查 `channels.feishu.answerers` 和已发送的原消息，重复回答不重复生效。合法回答被记录，并直接唤醒卡片所属的原规则；不需要另配 `card.answered` 路由。
 
-下一轮 `run.ts` 读取回答，验证它绑定的待发布清单和当前事实；每条发布前重新读取可信配置、Skill 和远端规范，再核对 MR 版本，才可能创建 GitLab 评论。读取规范与 GitLab 写入不是同一个远端事务，因此发送后还会核实，发现变化要交本人处理已发到旧版本的评论。等待人时，上一轮早已结束，不占模型进程。通道并不直接把点击转为 GitLab 写入。
+下一轮 `run.ts` 读取回答，验证它绑定的待发布清单和当前事实；每条发布前核对当前项目身份、MR head、CI、Reviewer 和批准范围，才可能创建 GitLab 评论。MR 状态核对与 GitLab 写入不是同一个远端事务，因此发送后还会核实，发现变化要交本人处理已发到旧版本的评论。等待人时，上一轮早已结束，不占模型进程。通道并不直接把点击转为 GitLab 写入。
 
 审查完成后，findings 通过通知或确认卡片发送；零 findings 也会产生结果通知。`tell: needed` 不额外发送通用完成摘要；无需为了收到审查结果改成 `always`，否则可能出现重复摘要。扫描规则也无需每次通知。
 
@@ -127,4 +127,4 @@ agent-autoloop why 12        # 第 12 轮经历了什么
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。

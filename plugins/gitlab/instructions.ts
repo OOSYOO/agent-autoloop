@@ -46,8 +46,17 @@ export function loadInstructions(
   return { prompt, digest: hash(prompt), ruleName: match.name };
 }
 
-export function checkJobRule(contextFile: string, expected: { ruleName: string; prompt: string }) {
+export function jobInstructions(contextFile: string) {
   const entry = JSON.parse(readFileSync(join(dirname(contextFile), "entry.json"), "utf8"));
-  if (entry.job?.rule?.name !== expected.ruleName || entry.job?.rule?.prompt !== expected.prompt)
-    throw new Error("运行规则与当前可信审查规则不一致");
+  const rule = entry.job?.rule;
+  if (
+    !rule ||
+    typeof rule.name !== "string" ||
+    !rule.name.trim() ||
+    typeof rule.prompt !== "string" ||
+    !rule.prompt.trim() ||
+    rule.skill !== undefined
+  )
+    throw new Error("运行规则缺少可信审查 prompt");
+  return { prompt: rule.prompt, digest: hash(rule.prompt), ruleName: rule.name };
 }

@@ -47,3 +47,32 @@ test("review findings use ordinary discussions without downloading a diff", () =
   assert.equal(item.position, null);
   assert.match(item.body, /a.ts/);
 });
+
+test("severity approval accepts only the exact P2 subset of the report", async () => {
+  const { severityItemsMatch } = await import("../plugins/gitlab/manifest.ts");
+  const findings = [{ ...finding, severity: "P0" as const }, finding];
+  const manual = manifest("work", 42, 7, "d".repeat(64), "e".repeat(64), refs, [finding]);
+  const mixed = manifest("work", 42, 7, "d".repeat(64), "e".repeat(64), refs, findings);
+  assert.equal(
+    severityItemsMatch("work", 42, 7, "d".repeat(64), "e".repeat(64), refs, findings, manual.items, "manual"),
+    true,
+  );
+  assert.equal(
+    severityItemsMatch("work", 42, 7, "d".repeat(64), "e".repeat(64), refs, findings, mixed.items, "manual"),
+    false,
+  );
+  assert.equal(
+    severityItemsMatch(
+      "work",
+      42,
+      7,
+      "d".repeat(64),
+      "e".repeat(64),
+      refs,
+      findings,
+      [{ ...manual.items[0], body: "changed" }],
+      "manual",
+    ),
+    false,
+  );
+});

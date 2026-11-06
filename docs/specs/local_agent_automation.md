@@ -2,7 +2,7 @@
 
 **状态：已实现并在本机部署。当前采用每仓库唯一 main 审查工作树和 Codex 原生配置；验证范围见 [验证记录](local_agent_automation_evidence.md)。**
 
-**实施合同：**每个项目只使用一份专用的 `codereview-worktree`，从已配置裸缓存的可信远端 `main` 分支获取最新 commit；不存在时创建，存在时更新到该 commit。Codex 在该目录按原生机制读取仓库规则与 Skill，并执行唯一可信 `rules.prompt`；MR 标题、描述、版本和差异只是隔离资料。日常开发目录不 pull、reset 或切分支；不增加锁、并发协调、版本共存或调度。审查只读，不执行 MR 代码、测试、hooks 或发布。每轮记录实际 prompt、MR 与 main SHA；main/prompt/model 等依据变化使旧缓存和批准失效。旧 GitLab `skill`、`skillPath`、`projects.rules` 与 GitLab `rule.skill` 不兼容，必须移除。
+**实施合同：**每个项目只使用一份专用的 `codereview-worktree`，从已配置裸缓存的可信远端 `main` 分支获取最新 commit；不存在时创建，存在时更新到该 commit。Codex 在该目录按原生机制读取仓库规则与 Skill，并执行唯一可信 `rules.prompt`；MR 标题、描述、版本和差异只是隔离资料。日常开发目录不 pull、reset 或切分支；不增加锁、并发协调、版本共存或调度。审查只读，不执行 MR 代码、测试、hooks 或发布。每轮记录实际 prompt、MR 与 main SHA；仅 MR head 变化触发重审，其他依据变化不使同一 head 的结果失效。旧 GitLab `skill`、`skillPath`、`projects.rules` 与 GitLab `rule.skill` 不兼容，必须移除。
 
 目标：复用 agent-autoloop，在 Mac 上以最少业务扩展跑通 GitLab Review。有效需求见 [PRD v1.2](../../Local_Agent_Automation_PRD_v1.0.md)。本文件定义实施契约，不代表验收已经完成。
 
@@ -171,7 +171,7 @@ sequenceDiagram
     W->>H: POST result
 ```
 
-回答轮可能没有原事件和报告正文，因此恢复依赖已保存的不可变报告与摘要绑定。批准一旦保存，可用于恢复同份报告中未完成的动作；不能要求每次恢复都重新出现 context.answers。内容、Head、策略变化使旧授权失效。
+回答轮可能没有原事件和报告正文，因此恢复依赖已保存的不可变报告与摘要绑定。批准一旦保存，可用于恢复同份报告中未完成的动作；不能要求每次恢复都重新出现 context.answers。已批准内容、Head 或实际发布范围变化使旧授权失效；main、prompt、Skill 或模型变化不触发重审。
 
 需求与规范冲突作为 finding；不要求作者补充上下文。报告字段与文件原子写入按第 5 节执行。
 
@@ -330,7 +330,7 @@ POST body 只含 `body:string`：最终评论含文件、行号、自动化来�
 | 404 | 核对 MR 是否存在/可访问；不当成零问题 |
 | 429 | 读取请求遵循 Retry-After；写入仍先判断是否已发送，不盲重试 |
 | 发送后超时、5xx、断线、进程崩溃 | unknown，先查 Discussions；不能仅因查询暂时为空就立即再 POST |
-| 已过期/策略变化/拒绝 | 不发送；旧授权失效，保留报告 |
+| MR head 过期/授权范围不匹配/拒绝 | 不发送；保留报告，不触发同 head 重审 |
 
 查询标记时同时核对本人作者、MR、Head、位置和正文，不只认一个可被复制的标记。发送未知且无法证明结果时在原卡处理结果中提示人工核查；首期不提供“强制重发未知写入”的自动按钮。可证明已发送才写 sent；未知状态留存，不自动删除评论。
 
@@ -401,4 +401,4 @@ GitLab 规则的 `prompt` 是任务指令来源；旧 GitLab `skill`、`skillPat
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
