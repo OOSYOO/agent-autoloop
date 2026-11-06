@@ -423,3 +423,6 @@ GitLab 扫描与审查可一起交给远程 Linux Worker，中台与通道留在
 GitLab 可显式使用 checks 模式，按指定自动检查和同项目子流水线成功决定审查时机，人工审批不阻止开始审查；旧模式保持原行为，详见[自动检查门槛](gitlab-review.md#按自动检查判断审查时机)。
 
 GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。旧策略报告与批准不复用。
+
+
+模型完成状态以 `complete` 及原生进程完成记录判断。`complete=true` 时，executionIssue 中合法长度的附带摘要只保留在原始审计，规范化结果将其清空；不因此丢弃已校验的 findings。`complete=false` 仍作为执行失败处理，findings 的结构、路径与大小校验不变。
