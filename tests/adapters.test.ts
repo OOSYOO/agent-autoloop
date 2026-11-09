@@ -1,3 +1,4 @@
+// Failure mode: a Codex reconnect error incorrectly fails a subsequently completed turn.
 // What's different about each agent. Failure cases: a level of access maps to the wrong flag, full access is given unasked,
 // a retry starts a new conversation instead of going on, an error or a turn that never finished counts as an answer, a
 // program's warning is taken for its answer, the session isn't picked out, a command line's placeholder isn't filled in,
@@ -127,6 +128,13 @@ test("Codex: only a finished turn's last message is its answer", () => {
   const warning = { type: "item.completed", item: { type: "error", message: "under development" } };
   const said = (text: string) => ({ type: "item.completed", item: { type: "agent_message", text } });
   const ended = { type: "turn.completed", usage: { input_tokens: 9, cached_input_tokens: 3, output_tokens: 1 } };
+  const reconnect = { type: "error", message: "Reconnecting... 5/5 (request timed out)" };
+  assert.deepEqual(codex.read(lines(started, reconnect, said("好了"), ended), 0, ""), {
+    session: "t",
+    text: "好了",
+    finished: true,
+    usage: { input: 9, output: 1, cached: 3 },
+  });
   assert.deepEqual(codex.read(lines(started, warning, said("中途"), said("好了"), ended), 0, ""), {
     session: "t",
     text: "好了",
