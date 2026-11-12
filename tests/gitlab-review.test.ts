@@ -101,3 +101,19 @@ test("new findings confirmation closes only on changed head for its MR", async (
 test("a locally recorded event remains valid when review policy changes", () => {
   assert.deepEqual(selectRequest([{ detail: JSON.stringify(base) }], [base], base.headSha, 1, 2), base);
 });
+
+// Failure mode: removing audit hashes from display prevents stale confirmations from closing.
+test("structured open-card context identifies stale reports independently of display text", async () => {
+  const { obsoleteCards } = await import("../plugins/gitlab/review.ts");
+  const card = {
+    card: 10,
+    title: "待确认：发布 1 条审查评论",
+    text: "简短摘要",
+    at: "now",
+    about: JSON.stringify({ schema: 1, kind: "publish", manifestHash: "c".repeat(64) }),
+  };
+  const lookup = () => ({ projectId: 1, mrIid: 2, headSha: "a".repeat(40) });
+  assert.deepEqual(obsoleteCards([card], 1, 2, "b".repeat(40), lookup), [{ card: 10, reason: "MR 版本已变化" }]);
+  assert.deepEqual(obsoleteCards([card], 1, 3, "b".repeat(40), lookup), []);
+  assert.deepEqual(obsoleteCards([card], 1, 2, "a".repeat(40), lookup), []);
+});

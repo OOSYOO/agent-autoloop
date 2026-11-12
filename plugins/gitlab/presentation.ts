@@ -4,18 +4,9 @@ type Item = {
   body: string;
   position: { old_path?: string; new_path?: string; old_line?: number; new_line?: number } | null;
 };
-export function findingsPages(
-  url: string,
-  sha: string,
-  reportHash: string,
-  projectId: number,
-  mrIid: number,
-  policy: string,
-  findings: Finding[],
-  items: Item[],
-): string[] {
-  const header = `MR ${projectId}/${mrIid}，版本 ${sha}，策略 ${policy}，\nMR：${url}\n版本：${sha}\n报告：${reportHash}\n`;
-  if (!findings.length) return [`${header}0 条 findings，请继续人工 review / 审核。`];
+export function findingsPages(url: string, findings: Finding[], items: Item[]): string[] {
+  const header = reviewSummary(url, findings, items.length);
+  if (!findings.length) return [header];
   const descriptions = findings
     .map((f, i) => {
       const body = `[${f.severity}] ${f.title}\n\n${f.evidence}\n\n影响：${f.impact}\n\n建议：${f.suggestion}`;
@@ -34,10 +25,30 @@ export function findingsPages(
     })
     .join("");
   const source = [...descriptions];
-  const limit = 3800 - [...header].length;
+  const limit = 3800 - [...header].length - 40;
   if (limit <= 0 || source.length > limit * 10)
-    throw new Error("findings 超出飞书可完整展示的容量，未创建发布确认，也未发布评论。");
+    throw new Error("完整报告超出飞书可展示的容量，未创建发布确认，也未发布评论。");
   const chunks: string[] = [];
   while (source.length) chunks.push(source.splice(0, limit).join(""));
-  return chunks.map((chunk, i) => `${header}findings ${i + 1}/${chunks.length}\n${chunk}`);
+  return chunks.map(
+    (chunk, i) =>
+      `${header}${chunks.length > 1 ? `\n完整报告第 ${i + 1}/${chunks.length} 页` : ""}\n\n完整报告：\n${chunk}`,
+  );
+}
+
+export function reviewSummary(url: string, findings: Finding[], count: number): string {
+  if (!findings.length) return `${url}\n\n未发现问题，仍需人工审核。`;
+  const short = (text: string, limit: number) => {
+    const line = text.replace(/\s+/g, " ").trim();
+    const chars = [...line];
+    return chars.length > limit ? chars.slice(0, limit).join("") + "…" : line;
+  };
+  const preview = findings
+    .slice(0, 5)
+    .map(
+      (f) =>
+        `[${f.severity}${f.severity === "P3" ? " · 仅供参考" : ""}] ${short(f.title, 70)}\n${short(f.impact, 100)}\n建议：${short(f.suggestion, 100)}`,
+    )
+    .join("\n\n");
+  return `${url}\n\n${preview}${findings.length > 5 ? `\n\n另有 ${findings.length - 5} 条问题，见完整报告。` : ""}\n\n${count ? `确认后，将在这条 MR 下发布 ${count} 条问题的完整评论。` : "以下问题仅供参考，无需确认发布。"}`;
 }

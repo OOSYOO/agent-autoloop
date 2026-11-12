@@ -4,7 +4,10 @@ export function publishDecision(answer: Job["context"]["answers"][number], manif
   if (
     !/^[a-f0-9]{64}$/.test(manifestHash) ||
     answer.options.length !== 2 ||
-    !answer.options.every((option, i) => option === options[i]) ||
+    !(
+      answer.options[1] === options[1] &&
+      (answer.options[0] === options[0] || /^发布 [1-9]\d* 条评论$/.test(answer.options[0]))
+    ) ||
     (answer.choice !== 0 && answer.choice !== 1) ||
     answer.text !== null
   )

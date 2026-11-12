@@ -65,6 +65,12 @@ async function publishManifest(
     man.policyHash !== report.policyHash
   )
     throw new Error("报告与确认内容不一致");
+  if (
+    answer &&
+    /^发布 [1-9]\d* 条评论$/.test(answer.options[0]) &&
+    answer.options[0] !== `发布 ${man.items.length} 条评论`
+  )
+    throw new Error("确认数量与发布清单不一致");
   const project = config.projects.find((p) => p.id === report.projectId);
   if (!project || !Number.isSafeInteger(report.mrIid) || report.mrIid <= 0) throw new Error("报告项目无效");
   if (

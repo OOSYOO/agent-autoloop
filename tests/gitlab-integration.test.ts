@@ -252,7 +252,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.equal(staleServer.status, 0, staleServer.stderr);
-    assert.match(staleServer.stdout, /确认发布审查评论/);
+    assert.match(staleServer.stdout, /待确认：发布 \d+ 条审查评论/);
     rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     assert.equal(existsSync(join(root, "posts.log")), false);
     assert.equal(existsSync(join(hubHome, "cache.git")), false);
@@ -276,7 +276,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.equal(changedDuringRun.status, 0, changedDuringRun.stderr);
-    assert.match(changedDuringRun.stdout, /确认发布审查评论/);
+    assert.match(changedDuringRun.stdout, /待确认：发布 \d+ 条审查评论/);
     rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     writeFileSync(rulesPath, originalRulesForRace);
     const originalSkill = readFileSync(join(skillDir, "SKILL.md"), "utf8");
@@ -297,7 +297,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.equal(changedSkillRun.status, 0, changedSkillRun.stderr);
-    assert.match(changedSkillRun.stdout, /确认发布审查评论/);
+    assert.match(changedSkillRun.stdout, /待确认：发布 \d+ 条审查评论/);
     rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     writeFileSync(join(skillDir, "SKILL.md"), originalSkill);
     writeFileSync(join(root, "change-mr"), "1");
@@ -318,7 +318,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     );
     assert.equal(changedMrRun.status, 0, changedMrRun.stderr);
     assert.match(changedMrRun.stdout, /MR 版本已变化/);
-    assert.doesNotMatch(changedMrRun.stdout, /确认发布审查评论/);
+    assert.doesNotMatch(changedMrRun.stdout, /待确认：发布 \d+ 条审查评论/);
     assert.equal(existsSync(join(root, "posts.log")), false);
     writeFileSync(mrFile, JSON.stringify(mr));
     rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
@@ -339,7 +339,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       },
     );
     assert.notEqual(changedEligibility.status, 0);
-    assert.doesNotMatch(changedEligibility.stdout, /确认发布审查评论/);
+    assert.doesNotMatch(changedEligibility.stdout, /待确认：发布 \d+ 条审查评论/);
     assert.ok(readdirSync(join(root, "gitlab", "reports")).length > 0, "completed report survives eligibility loss");
     writeFileSync(mrFile, JSON.stringify(mr));
     chmodSync(codex, 0o000);
@@ -362,7 +362,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     assert.equal(child.status, 0, child.stderr);
     const result = resultFrom(readMessage(child.stdout), {});
     assert.equal(result.problem, undefined, child.stdout);
-    assert.equal(result.result.ask?.[0].options[0], "发布这份报告中的评论", child.stdout);
+    assert.equal(result.result.ask?.[0].options[0], "发布 1 条评论", child.stdout);
     assert.match(result.result.ask![0].text, /将发布[\s\S]*证据[\s\S]*建议/);
     await call(`/v1/runs/${job.run}/result`, job.token, result.result);
     const card = (await call("/v1/cards/next?wait=0", channel)).card;
@@ -373,6 +373,8 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     assert.ok(next);
     await call(`/v1/runs/${next.run}/started`, next.token, {});
     const ask = result.result.ask![0];
+    assert.ok(next.context.answers[0].about);
+
     const firstManifest = loadArtifact(join(root, "gitlab"), "manifests", JSON.parse(ask.about!).manifestHash) as any;
     const firstReport = loadArtifact(join(root, "gitlab"), "reports", firstManifest.reportHash) as any;
     assert.equal(firstReport.trustedRules.commit, trustedCommit);
@@ -483,6 +485,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       context,
       JSON.stringify({
         ...next.context,
+        open: [{ card: 987, title: ask.title, text: "摘要不含版本", about: ask.about, at: "now" }],
         events: [
           {
             id: `gitlab:${req.requestId}`,
@@ -541,6 +544,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       context,
       JSON.stringify({
         ...next.context,
+        open: [{ card: 987, title: ask.title, text: "摘要不含版本", about: ask.about, at: "now" }],
         events: [
           {
             id: `gitlab:${newerReq.requestId}`,
@@ -570,7 +574,11 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     const changedResult = resultFrom(readMessage(changed.stdout), {});
     assert.equal(changedResult.problem, undefined, changed.stdout);
     assert.ok(
-      changedResult.result.ask?.some((item) => item.title === "确认发布审查评论"),
+      changedResult.result.resolve?.some((r) => r.card === 987),
+      changed.stdout,
+    );
+    assert.ok(
+      changedResult.result.ask?.some((item) => /^待确认：发布 \d+ 条审查评论$/.test(item.title)),
       changed.stdout,
     );
     const duplicateRequest = { ...newerReq, requestId: "7".repeat(64), observation: 18 };
@@ -681,7 +689,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     assert.equal(manual.status, 0, manual.stderr);
     const manualResult = resultFrom(readMessage(manual.stdout), {});
     assert.equal(manualResult.problem, undefined, manual.stdout);
-    const manualAsk = manualResult.result.ask?.find((item) => item.title === "确认发布审查评论");
+    const manualAsk = manualResult.result.ask?.find((item) => /^待确认：发布 \d+ 条审查评论$/.test(item.title));
     assert.ok(manualAsk, manual.stdout);
     const manifestHash = JSON.parse(manualAsk.about!).manifestHash;
     const manifest = loadArtifact(join(root, "gitlab"), "manifests", manifestHash) as any;
@@ -857,11 +865,11 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     const compareResult = resultFrom(readMessage(compare.stdout), {});
     assert.equal(compareResult.problem, undefined, compare.stdout);
     assert.ok(
-      compareResult.result.ask?.some((item) => item.title === "确认发布审查评论"),
+      compareResult.result.ask?.some((item) => /^待确认：发布 \d+ 条审查评论$/.test(item.title)),
       compare.stdout,
     );
     assert.equal(readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length, 3);
-    const comparisonAsk = compareResult.result.ask!.find((item) => item.title === "确认发布审查评论")!;
+    const comparisonAsk = compareResult.result.ask!.find((item) => /^待确认：发布 \d+ 条审查评论$/.test(item.title))!;
     const comparisonEvent = {
       id: `gitlab:${compareReq.requestId}`,
       source: "gitlab",
