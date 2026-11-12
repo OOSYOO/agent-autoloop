@@ -3,7 +3,7 @@ export function discoveryPath(projectId: number): string {
   return `projects/${projectId}/merge_requests?state=opened&per_page=100`;
 }
 export { eligible } from "./ci.ts";
-import { eligibleForReview, type Override } from "./ci.ts";
+import { eligibleForReview, isTerminalMR, type Override } from "./ci.ts";
 
 export async function scanGitlab(argv: string[], reuseHead = false) {
   const { readFileSync, existsSync } = await import("node:fs");
@@ -58,6 +58,7 @@ export async function scanGitlab(argv: string[], reuseHead = false) {
         }
         foundManual = true;
         const mr = (await gl.get(`projects/${project.id}/merge_requests/${iid}`)) as any;
+        if (isTerminalMR(mr)) continue;
         const digest = policyHash(config, project, instructionsDigest);
         const file = join(config.dataRoot, "gitlab", "requests", `${project.id}`, `${iid}.json`);
         const previous = latestRequest(join(config.dataRoot, "gitlab"), project.id, iid);

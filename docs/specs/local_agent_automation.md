@@ -556,3 +556,7 @@ GitLab 规则的 `prompt` 是任务指令来源；旧 GitLab `skill`、`skillPat
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
 自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
+
+## 已结束 MR 请求的收尾
+
+GitLab 插件在手动扫描（含飞书委托）、审查开始和审查完成的当前事实复核中，把 merged/closed 归为正常结束：不再派单或启动模型，不发布评论，不触发中台失败重试。分析中进入终态则保留已经完成的报告。该判断在实例、项目和本人身份核对之后执行；草稿、未知／缺失状态及网络错误仍保持原处理，不能用本次修复绕过发布授权。已有过期重试通过本人取消接口结束，事实日志保留，不直接修改业务库或重置重试计数。验收入口为 tests/feishu-review-runtime.test.ts 和 tests/gitlab-integration.test.ts，覆盖 merged/closed 两种状态、开始前与分析中终态、不派单／不调模型／不写评论及报告保留。

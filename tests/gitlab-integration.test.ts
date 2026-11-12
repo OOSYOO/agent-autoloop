@@ -1,4 +1,4 @@
-// Failure modes: CI blocks execution or answer publication; a remote report cannot resume, or a stale rule copy accepts a Hub job.
+// Failure modes: completed MRs retry forever; CI blocks execution or answer publication; a remote report cannot resume, or a stale rule copy accepts a Hub job.
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import {
@@ -113,7 +113,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(reportFile, JSON.stringify(report));
     writeFileSync(
       codex,
-      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;if(a.includes('app-server')){const q=require('readline').createInterface({input:process.stdin});q.on('line',l=>{let x=JSON.parse(l);if(x.id===1)console.log(JSON.stringify({id:1,result:{}}));if(x.id===2)console.log(JSON.stringify({id:2,result:{config:{mcp_servers:{},features:{hooks:false,apps:false,memories:false},web_search:'disabled',permissions:{review:{network:{enabled:false},filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}}}}}}}));if(x.id===3)console.log(JSON.stringify({id:3,result:{data:[{cwd:process.cwd(),errors:[],skills:[{name:'alpha',path:${JSON.stringify(join(skillDir, "SKILL.md"))},scope:'user',enabled:true}]}]}}))});}else {const mr=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));let prompt='';process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(prompt.includes(mr.description)||prompt.includes(mr.title)||!prompt.includes('使用alpha详细审查')||!prompt.includes('https://gitlab.example.com/team/app/-/merge_requests/7')||!prompt.includes(mr.sha)||prompt.includes('git --git-dir'))process.exit(3);if(fs.existsSync(${JSON.stringify(join(root, "change-mr"))})){let change=fs.readFileSync(${JSON.stringify(join(root, "change-mr"))},'utf8');fs.unlinkSync(${JSON.stringify(join(root, "change-mr"))});if(change==='draft')mr.draft=true;else if(change==='ci')mr.head_pipeline={id:99,sha:mr.sha,status:'failed'};else mr.sha='f'.repeat(40);fs.writeFileSync(${JSON.stringify(mrFile)},JSON.stringify(mr));}if(fs.existsSync(${JSON.stringify(join(root, "change-skill"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-skill"))});fs.writeFileSync(${JSON.stringify(join(skillDir, "SKILL.md"))},'changed skill');}if(fs.existsSync(${JSON.stringify(join(root, "change-prompt"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-prompt"))});let f=${JSON.stringify(join(root, "rules.json"))},r=JSON.parse(fs.readFileSync(f));r.rules[0].prompt='更改的可信指令';fs.writeFileSync(f,JSON.stringify(r));}fs.writeFileSync(a[a.indexOf('-o')+1],fs.readFileSync(${JSON.stringify(reportFile)}));console.log(JSON.stringify({type:'turn.completed'}));});}`,
+      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;if(a.includes('app-server')){const q=require('readline').createInterface({input:process.stdin});q.on('line',l=>{let x=JSON.parse(l);if(x.id===1)console.log(JSON.stringify({id:1,result:{}}));if(x.id===2)console.log(JSON.stringify({id:2,result:{config:{mcp_servers:{},features:{hooks:false,apps:false,memories:false},web_search:'disabled',permissions:{review:{network:{enabled:false},filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}}}}}}}));if(x.id===3)console.log(JSON.stringify({id:3,result:{data:[{cwd:process.cwd(),errors:[],skills:[{name:'alpha',path:${JSON.stringify(join(skillDir, "SKILL.md"))},scope:'user',enabled:true}]}]}}))});}else {const mr=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));let prompt='';process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(prompt.includes(mr.description)||prompt.includes(mr.title)||!prompt.includes('使用alpha详细审查')||!prompt.includes('https://gitlab.example.com/team/app/-/merge_requests/7')||!prompt.includes(mr.sha)||prompt.includes('git --git-dir'))process.exit(3);if(fs.existsSync(${JSON.stringify(join(root, "change-mr"))})){let change=fs.readFileSync(${JSON.stringify(join(root, "change-mr"))},'utf8');fs.unlinkSync(${JSON.stringify(join(root, "change-mr"))});if(change==='draft')mr.draft=true;else if(change==='merged'||change==='closed')mr.state=change;else if(change==='ci')mr.head_pipeline={id:99,sha:mr.sha,status:'failed'};else mr.sha='f'.repeat(40);fs.writeFileSync(${JSON.stringify(mrFile)},JSON.stringify(mr));}if(fs.existsSync(${JSON.stringify(join(root, "change-skill"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-skill"))});fs.writeFileSync(${JSON.stringify(join(skillDir, "SKILL.md"))},'changed skill');}if(fs.existsSync(${JSON.stringify(join(root, "change-prompt"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-prompt"))});let f=${JSON.stringify(join(root, "rules.json"))},r=JSON.parse(fs.readFileSync(f));r.rules[0].prompt='更改的可信指令';fs.writeFileSync(f,JSON.stringify(r));}fs.writeFileSync(a[a.indexOf('-o')+1],fs.readFileSync(${JSON.stringify(reportFile)}));console.log(JSON.stringify({type:'turn.completed'}));});}`,
       { mode: 0o700 },
     );
     execFileSync(process.execPath, ["--check", codex]);
@@ -232,6 +232,39 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(join(root, "entry.json"), JSON.stringify({ job: { rule: job.rule } }));
     const file = join(root, "config.json");
     writeFileSync(file, JSON.stringify(raw));
+    const executeTerminal = () =>
+      spawnSync(process.execPath, [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: root,
+          AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
+          AGENT_AUTOLOOP_CONTEXT: context,
+          AGENT_AUTOLOOP_RUN: "1",
+        },
+      });
+    for (const state of ["merged", "closed"]) {
+      writeFileSync(mrFile, JSON.stringify({ ...mr, state }));
+      const result = executeTerminal();
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readMessage(result.stdout).outcome, "nothing");
+      assert.match(result.stdout, /已合并或关闭/);
+      assert.equal(existsSync(join(root, "gitlab/reports")), false, "no model report for completed MR");
+      assert.equal(existsSync(join(root, "posts.log")), false);
+    }
+    for (const state of ["merged", "closed"]) {
+      writeFileSync(mrFile, JSON.stringify(mr));
+      writeFileSync(join(root, "change-mr"), state);
+      const result = executeTerminal();
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readMessage(result.stdout).outcome, "nothing");
+      assert.match(result.stdout, /已合并或关闭/);
+      assert.ok(readdirSync(join(root, "gitlab/reports")).length, "report retained if MR finishes during analysis");
+      assert.equal(existsSync(join(root, "posts.log")), false);
+      rmSync(join(root, "gitlab/reports"), { recursive: true });
+    }
+    writeFileSync(mrFile, JSON.stringify(mr));
     const originalRulesForRace = readFileSync(rulesPath, "utf8");
     const staleRules = JSON.parse(originalRulesForRace);
     staleRules.rules[0].prompt = "服务器旧 prompt";

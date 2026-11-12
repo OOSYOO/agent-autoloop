@@ -1,7 +1,7 @@
-// Failure modes: a lost delivery advances the cursor; confirmation bypasses draft restrictions; repeated requests dispatch the same head twice.
+// Failure modes: a completed MR retries forever; a lost delivery advances the cursor; confirmation bypasses draft restrictions; repeated requests dispatch the same head twice.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:http";
@@ -125,6 +125,14 @@ test("fake CLI scan, confirmation and GitLab admission survive replay and retain
     assert.equal(result.ask.length, 1);
     assert.equal(events.size, 1);
     const confirmed = { events: [], answers: [{ about: result.ask[0].about, choice: 0 }] };
+    for (const state of ["merged", "closed"]) {
+      writeFileSync(mrFile, JSON.stringify({ ...mr, state }));
+      const obsolete = await run("review", confirmed);
+      assert.equal(obsolete.code, 0, obsolete.stderr);
+      assert.equal(JSON.parse(obsolete.stdout.split("```agent-autoloop\n")[1].split("\n```")[0]).ask.length, 0);
+      assert.equal(events.size, 1, "completed MR must not dispatch a review");
+      assert.equal(existsSync(join(root, "gitlab/requests/42/7.json")), false);
+    }
     writeFileSync(mrFile, JSON.stringify({ ...mr, draft: true }));
     assert.equal((await run("review", confirmed)).code, 1);
     assert.equal(events.size, 1);
