@@ -402,17 +402,17 @@ GitLab Review 通过标准 gitlab Agent 插件、来源事件和卡片接续；�
 
 GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](gitlab-review.md)。
 
-GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 作为独立只读资料提供，不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](gitlab-review.md)。
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 以链接交给 Codex 自行读取，要求不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](gitlab-review.md)。
 
 
-扫描、请求去重、报告缓存、卡片回答及每条评论发布前复核共用同一策略依据：实际 prompt、main 提交、原生有效配置和 Skill 目录/文件摘要，以及模型与项目发布条件。MR head 另行核对。运行中依据改变时不继续交付旧结果；旧格式报告和旧批准不复用，历史事实保留，不迁移数据库。审计保存实际 prompt、main/MR SHA、原生目录及文件摘要和模型输出；配置只保存摘要，避免泄露密钥。目录中存在 Skill 只表示可发现，不代表模型已经读取或执行了它。缺失、歧义或只读能力冲突应明确报告执行失败，不能冒充零 findings。
+审计记录保存实际 prompt、main/MR SHA、模型和原生 Skill 目录/文件摘要；这些审计字段不决定同一 MR head 是否重审。原生配置只保留摘要，不保存密钥。目录中存在 Skill 不代表模型已实际读取或执行，执行未完成仍须明确报错。
 
 GitLab 插件通过 Codex 原生配置读取和 Skill 目录接口取得审查依据，不调用模型进行扫描筛选。`gitlab check` 只检查本地配置、路由、程序和缓存，不联网，也不保证某个 Skill 已加载。审查按本人平时的 Codex 配置启动，保留原生 Skill、MCP 和工具配置，不额外增加工具禁用或权限覆盖。只读审查、不执行 MR 代码和不发布是本轮任务要求；实际能力由原生 Codex 配置决定。完整 main 仓库可读，MR 的规范变更仍只是待审资料。工作树由仓库复用，不提供每个 MR 的独立目录或运行期间不变的保证；插件不增加锁、队列或并发协调，调度仍由中台规则控制。
 
 
-GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。该模式下无法行内定位的问题发布为普通 Discussion，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
+GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-重审依据限定为 MR 版本、main、可信 prompt、模型，以及 prompt 明确提到的原生 Skill 正文及其目录引用资料、全局仓库指令和指令相关 Codex 设置。无关 Skill、插件安装清单、项目信任列表及界面设置变化不触发重审。这里的名称匹配只筛选失效依据，不负责加载 Skill；实际发现和读取仍由原生 Codex 完成。扫描、缓存、回答续办和发布前核验使用同一依据，旧摘要下的批准不复用。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
 
 
 飞书卡片将校验通过的 HTTP/HTTPS 网址呈现为可点击超链接；同一正文可含多个链接。其余正文仍按纯文本显示，链接标签和目标分别转义，不将 finding 中的标记或提及当成指令或交互。
@@ -420,6 +420,11 @@ GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发�
 
 GitLab 扫描与审查可一起交给远程 Linux Worker，中台与通道留在 Mac；两端使用独立数据目录与同一规则副本，服务器 capacity=1。部署、断线恢复和切换约束见[远程 Worker](gitlab-review.md#远程-worker)。
 
-GitLab 可显式使用 checks 模式，按指定自动检查和同项目子流水线成功决定审查时机，人工审批不阻止开始审查；旧模式保持原行为，详见[自动检查门槛](gitlab-review.md#按自动检查判断审查时机)。
+GitLab 审查从扫描到评论发布均不等待 CI；旧 CI 配置仅兼容读取，详见[CI 配置兼容](gitlab-review.md#按自动检查判断审查时机)。
 
-GitLab 审查在可信 main 仓库中直接读取固定 SHA 的 MR Git 对象，不再导出整库文字快照或限制仓库大小；不检出或执行 MR。资源不足明确报错，旧策略报告与批准不复用。
+GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
+
+
+模型完成状态以 `complete` 及原生进程完成记录判断。`complete=true` 时，executionIssue 中合法长度的附带摘要只保留在原始审计，规范化结果将其清空；不因此丢弃已校验的 findings。`complete=false` 仍作为执行失败处理，findings 的结构、路径与大小校验不变。
+
+飞书可作为 GitLab 审查的第二入口：用本人身份轮询群聊 @ 和私聊，明确请求自动审查、模糊请求用卡片确认。只覆盖 Reviewer，保留草稿和发布策略，CI 不再作为门槛；同 head 不重复派发，不回复同事。使用标准 `feishu` Agent 插件，显式配置后启用；权限、串行接入与部署见[飞书消息委托审查](gitlab-review.md#飞书消息委托审查)。

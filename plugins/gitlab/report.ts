@@ -49,14 +49,15 @@ export function parseModelReport(text: string): ModelReport {
     throw new ModelIncompleteError(value.executionIssue.replace(/[\x00-\x1f\x7f]/g, " "));
   if (
     !object(value, ["complete", "executionIssue", "findings"]) ||
-    value.executionIssue !== "" ||
+    typeof value.executionIssue !== "string" ||
+    [...value.executionIssue].length > 1000 ||
     value.complete !== true ||
     !Array.isArray(value.findings) ||
     value.findings.length > 100 ||
     !value.findings.every(finding)
   )
     throw new Error("报告格式不符合要求");
-  return value as ModelReport;
+  return { complete: true, executionIssue: "", findings: value.findings as Finding[] };
 }
 
 export const modelReportSchema = {
@@ -65,7 +66,11 @@ export const modelReportSchema = {
   required: ["complete", "executionIssue", "findings"],
   properties: {
     complete: { type: "boolean" },
-    executionIssue: { type: "string", maxLength: 1000 },
+    executionIssue: {
+      type: "string",
+      maxLength: 1000,
+      description: "Only describe an execution failure when complete is false; otherwise leave empty.",
+    },
     findings: {
       type: "array",
       maxItems: 100,

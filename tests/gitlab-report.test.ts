@@ -76,3 +76,13 @@ test("incomplete review reports its specific execution limitation", () => {
     /必需 Skill 不可用/,
   );
 });
+
+test("a completed review tolerates a summary in executionIssue but still validates findings", () => {
+  const payload = { ...valid(), executionIssue: "已完成审查，共发现一项问题" };
+  assert.deepEqual(parseModelReport(JSON.stringify(payload)), valid());
+  assert.throws(() => parseModelReport(JSON.stringify({ ...payload, executionIssue: "x".repeat(1001) })));
+  assert.throws(() =>
+    parseModelReport(JSON.stringify({ ...payload, findings: [{ ...payload.findings[0], severity: "P4" }] })),
+  );
+  assert.throws(() => parseModelReport(JSON.stringify({ ...payload, complete: false })), /已完成审查/);
+});

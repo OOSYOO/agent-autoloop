@@ -50,7 +50,7 @@ test("unrouted record is retried only as a new observation after repair", async 
   assert.notEqual(posted[0].id, posted[1].id);
 });
 
-test("automatic scan never inherits a manual request ID", async () => {
+test("automatic scan does not redispatch a delivered manual request", async () => {
   const records: any[] = [
     {
       schema: 1,
@@ -85,11 +85,10 @@ test("automatic scan never inherits a manual request ID", async () => {
     policy,
     io,
   );
-  assert.equal(posted.length, 1);
-  assert.notEqual(posted[0].id, `gitlab:${"d".repeat(64)}`);
+  assert.equal(posted.length, 0);
 });
 
-test("delivered manual review without overrides is reused only for the same eligible observation", async () => {
+test("delivered manual review is reused unless its head changes", async () => {
   const base = {
     schema: 1,
     instanceKey: "work",
@@ -132,12 +131,12 @@ test("delivered manual review without overrides is reused only for the same elig
         },
       },
     );
-    if (variant === "same") {
+    if (variant !== "head") {
       assert.equal(records.length, 1);
       assert.equal(posted.length, 0);
     } else {
       assert.notEqual(records.at(-1).requestId, base.requestId);
-      assert.equal(posted.length, variant === "ineligible" ? 0 : 1);
+      assert.equal(posted.length, 1);
       if (posted.length) assert.equal(JSON.parse(posted[0].detail).overrides, undefined);
     }
   }
@@ -165,7 +164,7 @@ test("multiple matching review rules are not accepted as one dispatch", async ()
   assert.notEqual(records.at(-1).delivered, true);
 });
 
-test("reviewer removal then reassignment at the same SHA produces a new request", async () => {
+test("reviewer removal then reassignment at the same SHA does not dispatch again", async () => {
   const records: any[] = [];
   const posted: any[] = [];
   let assigned = true;
@@ -194,12 +193,11 @@ test("reviewer removal then reassignment at the same SHA produces a new request"
   await scanProject(config, project, "team/project", policy, io);
   assigned = true;
   await scanProject(config, project, "team/project", policy, io);
-  assert.equal(posted.length, 2);
-  assert.notEqual(posted[0].id, posted[1].id);
-  assert.equal(records.at(-1).observation, 3);
+  assert.equal(posted.length, 1);
+  assert.equal(records.at(-1).observation, 1);
 });
 
-test("automatic checks use the shared live gate and never fall back to parent success", async () => {
+test("CI cannot block initial dispatch or redispatch the delivered head", async () => {
   const { eligibleForReview } = await import("../plugins/gitlab/ci.ts");
   const mr = {
     iid: 7,
@@ -213,7 +211,7 @@ test("automatic checks use the shared live gate and never fall back to parent su
   const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 };
   const posted: object[] = [],
     records: any[] = [];
-  let status = "success";
+  let status = "failed";
   const gl = {
     get: async () => mr,
     list: async () => [{ id: 1, name: "host", status, commit: { id: sha }, pipeline: { id: 10 } }],
@@ -234,9 +232,76 @@ test("automatic checks use the shared live gate and never fall back to parent su
   assert.equal(posted.length, 1);
   status = "failed";
   await scanProject(config, project, "team/project", policy, io);
-  assert.equal(records.at(-1).eligible, false);
+  assert.equal(records.at(-1).eligible, true);
   assert.equal(posted.length, 1);
   mr.head_pipeline.status = "success";
   await scanProject(config, project, "team/project", policy, { ...io, eligible: undefined });
-  assert.equal(records.at(-1).eligible, false, "checks cannot use the legacy synchronous predicate");
+  assert.equal(records.at(-1).eligible, true, "the delivered observation remains unchanged");
+});
+
+test("delivered head is not dispatched again after policy or eligibility changes", async () => {
+  const records: any[] = [],
+    posted: any[] = [];
+  let assigned = true;
+  const io = {
+    list: async () => [
+      {
+        iid: 1,
+        state: "opened",
+        draft: false,
+        sha,
+        reviewers: assigned ? [{ id: 8 }] : [],
+        head_pipeline: { sha, status: "success" },
+      },
+    ],
+    read: () => records.at(-1),
+    write: (r: any) => records.push(r),
+    post: async (e: any) => {
+      posted.push(e);
+      return { event: 1, duplicate: false, routed: ["review"] };
+    },
+  };
+  const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 },
+    project = { id: 42, ciMode: "required" as const };
+  await scanProject(config, project, "team/project", policy, io);
+  assigned = false;
+  await scanProject(config, project, "team/project", "e".repeat(64), io);
+  assigned = true;
+  await scanProject(config, project, "team/project", "e".repeat(64), io);
+  assert.equal(posted.length, 1);
+});
+
+test("lost response retries the same delivered identity despite policy and eligibility changes", async () => {
+  const records: any[] = [],
+    events: any[] = [];
+  let assigned = true;
+  const io = {
+    list: async () => [
+      {
+        iid: 1,
+        state: "opened",
+        draft: false,
+        sha,
+        reviewers: assigned ? [{ id: 8 }] : [],
+        head_pipeline: { sha, status: "success" },
+      },
+    ],
+    read: () => records.at(-1),
+    write: (v: any) => records.push(v),
+    post: async (v: any) => {
+      events.push(v);
+      if (events.length === 1) throw Error("lost");
+      return { event: 1, duplicate: true, routed: ["review"] };
+    },
+  };
+  const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 },
+    project = { id: 42, ciMode: "required" as const };
+  await assert.rejects(scanProject(config, project, "team/project", policy, io));
+  assigned = false;
+  await scanProject(config, project, "team/project", "e".repeat(64), io);
+  assigned = true;
+  await scanProject(config, project, "team/project", "e".repeat(64), io);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].id, events[1].id);
+  assert.equal(events[0].detail, events[1].detail);
 });

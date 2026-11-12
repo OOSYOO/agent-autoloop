@@ -6,6 +6,6 @@ test("each publication outcome is reported honestly", () => {
   assert.match(answerOutcome(["unknown"])!, /未确认/);
   assert.match(answerOutcome(["sent"])!, /已发布/);
   assert.match(answerOutcome(["rejected"])!, /不发布/);
-  assert.match(answerOutcome(["sent-stale"])!, /旧版本/);
+  assert.match(answerOutcome(["sent-stale"])!, /状态或发布权限已变化/);
   assert.equal(answerOutcome(["ignored"]), null);
 });

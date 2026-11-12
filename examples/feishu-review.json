@@ -1,0 +1,5 @@
+{
+  "user": "ou_REPLACE_WITH_YOUR_OPEN_ID",
+  "gitlabConfig": "config.json",
+  "lark": "lark-cli"
+}

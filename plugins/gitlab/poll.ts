@@ -5,20 +5,18 @@ export function discoveryPath(projectId: number): string {
 export { eligible } from "./ci.ts";
 import { eligibleForReview, type Override } from "./ci.ts";
 
-async function main() {
+export async function scanGitlab(argv: string[], reuseHead = false) {
   const { readFileSync, existsSync } = await import("node:fs");
   const { HOME, RULES_FILE } = await import("../../host/home.ts");
   const { loadInstructions } = await import("./instructions.ts");
-  const { nativeBasis } = await import("./native.ts");
   const { join } = await import("node:path");
   const { loadConfig, policyHash } = await import("./config.ts");
   const { hash, atomicFile, canonical } = await import("./storage.ts");
   const { GitLab, TemporaryError } = await import("./api.ts");
-  const { trustedRules, verifyProjectRemote } = await import("./trusted-rules.ts");
+  const { verifyProjectRemote } = await import("./trusted-rules.ts");
   const { scanProject } = await import("./scan.ts");
   const { manualTarget } = await import("./manual.ts");
   const { nextObservation, saveRequest, latestRequest } = await import("./request.ts");
-  const argv = process.argv.slice(2);
   if (argv.length < 2 || argv[0] !== "--config") throw new Error("请提供配置文件路径");
   let mrUrl: string | undefined,
     reason = "",
@@ -49,10 +47,8 @@ async function main() {
   for (const project of config.projects) {
     try {
       const metadata = await verifyProjectRemote(gl, project);
-      const rules = trustedRules(project);
       const instructions = loadInstructions(argv[1], project.id, HOME, RULES_FILE);
-      const native = await nativeBasis(config.codexPath, rules.worktree, instructions.prompt);
-      const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
+      const instructionsDigest = hash(instructions.prompt);
       if (mrUrl) {
         let iid: number;
         try {
@@ -62,11 +58,19 @@ async function main() {
         }
         foundManual = true;
         const mr = (await gl.get(`projects/${project.id}/merge_requests/${iid}`)) as any;
-        if (!(await eligibleForReview(gl, project, mr, config.reviewerId, overrides)))
-          throw new Error("MR 未满足审查条件");
-        const digest = policyHash(config, project, instructionsDigest, rules.digest);
+        const digest = policyHash(config, project, instructionsDigest);
         const file = join(config.dataRoot, "gitlab", "requests", `${project.id}`, `${iid}.json`);
         const previous = latestRequest(join(config.dataRoot, "gitlab"), project.id, iid);
+        if (
+          reuseHead &&
+          previous?.delivered &&
+          !previous.unrouted &&
+          previous.headSha === mr.sha &&
+          previous.instanceKey === config.instanceKey
+        )
+          continue;
+        if (!(await eligibleForReview(gl, project, mr, config.reviewerId, overrides)))
+          throw new Error("MR 未满足审查条件");
         const value = {
           instanceKey: config.instanceKey,
           projectId: project.id,
@@ -79,9 +83,9 @@ async function main() {
         const sameManual =
           previous?.origin === "manual" &&
           previous.headSha === mr.sha &&
-          previous.policyHash === digest &&
+          (reuseHead || previous.policyHash === digest) &&
           canonical(previous.overrides) === canonical(overrides) &&
-          previous.reason === reason &&
+          (reuseHead || previous.reason === reason) &&
           !previous.delivered &&
           !previous.unrouted;
         if (!sameManual && previous && observation.requestId === previous.requestId)
@@ -103,7 +107,7 @@ async function main() {
           projectId: project.id,
           mrIid: iid,
           headSha: mr.sha,
-          policyHash: digest,
+          policyHash: record.policyHash,
           observation: record.observation,
           origin: "manual",
         };
@@ -143,7 +147,7 @@ async function main() {
         if (!Number.isSafeInteger(iid) || (iid as number) <= 0) throw new Error("MR 编号无效");
         mrs.push(await gl.get(`projects/${project.id}/merge_requests/${iid}`));
       }
-      const digest = policyHash(config, project, instructionsDigest, rules.digest);
+      const digest = policyHash(config, project, instructionsDigest);
       const directory = join(config.dataRoot, "gitlab", "requests", `${project.id}`);
       await scanProject(config, project, metadata.path_with_namespace, digest, {
         retryUnrouted,
@@ -170,10 +174,10 @@ async function main() {
   if (mrUrl && !foundManual) throw new Error("MR 不属于配置实例或项目");
   if (temporary) throw new TemporaryError("GitLab 或中台暂时不可用");
   if (errors.length) throw new Error(errors.join("；"));
-  console.log("扫描完成");
+  if (!reuseHead) console.log("扫描完成");
 }
 if (process.argv[1] && import.meta.url === (await import("node:url")).pathToFileURL(process.argv[1]).href) {
-  main().catch(async (error) => {
+  scanGitlab(process.argv.slice(2)).catch(async (error) => {
     const { TemporaryError } = await import("./api.ts");
     if (error instanceof TemporaryError) {
       console.log("没跑成：GitLab 或中台暂时不可用");

@@ -165,7 +165,7 @@ export function loadConfig(configFile: string): Config {
 export function policyHash(config: Config, project: Project, instructionsDigest: string, rulesDigest?: string): string {
   return hash(
     canonical({
-      reviewPolicy: "native-git-objects-v4",
+      reviewPolicy: "native-mr-url-v5",
       instanceKey: config.instanceKey,
       instanceUrl: config.instanceUrl,
       trustedHttpOrigin: config.trustedHttpOrigin ?? null,
@@ -174,8 +174,6 @@ export function policyHash(config: Config, project: Project, instructionsDigest:
       projectPath: project.projectPath ?? null,
       rulesDigest: rulesDigest ?? null,
       publication: project.publication,
-      ciMode: project.ciMode,
-      ...(project.ciMode === "checks" ? { ciJobs: project.ciJobs, ciBridges: project.ciBridges ?? [] } : {}),
       model: config.model,
       effort: config.effort ?? null,
       instructionsDigest,

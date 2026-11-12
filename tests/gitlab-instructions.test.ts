@@ -38,22 +38,21 @@ test("rejects absent, empty, ambiguous or differently configured review instruct
   assert.throws(() => instructions(elsewhere));
 });
 
-test("GitLab requires a single prompt source and validates the dispatched Job rule", async () => {
-  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const { checkJobRule } = await import("../plugins/gitlab/instructions.ts");
+test("GitLab rejects a separate rule.skill source", () => {
   const routed = settings();
   Object.assign(routed.rules[0], { skill: "code-review" });
   assert.throws(() => instructions(routed), /rule.skill/);
-  const root = mkdtempSync(join(tmpdir(), "gitlab-job-rule-"));
+});
+
+test("dispatched trusted job retains its original prompt after rules change", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { jobInstructions } = await import("../plugins/gitlab/instructions.ts");
+  const root = mkdtempSync(join(tmpdir(), "gitlab-job-snapshot-"));
   try {
     writeFileSync(join(root, "entry.json"), JSON.stringify({ job: { rule: { name: "review-14", prompt: "原规则" } } }));
-    checkJobRule(join(root, "context.json"), { ruleName: "review-14", prompt: "原规则" });
-    assert.throws(
-      () => checkJobRule(join(root, "context.json"), { ruleName: "review-14", prompt: "新规则" }),
-      /不一致/,
-    );
+    assert.equal(jobInstructions(join(root, "context.json")).prompt, "原规则");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

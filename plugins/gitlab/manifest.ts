@@ -1,8 +1,6 @@
-import { positionFor } from "./diff.ts";
 import type { Finding } from "./report.ts";
 import { canonical, hash } from "./storage.ts";
-type Refs = Parameters<typeof positionFor>[1];
-type Diffs = Parameters<typeof positionFor>[0];
+type Refs = { head_sha: string };
 export function manifest(
   instanceKey: string,
   projectId: number,
@@ -11,17 +9,12 @@ export function manifest(
   policyHash: string,
   refs: Refs,
   findings: Finding[],
-  diffs: Diffs,
-  fallback = false,
 ) {
   const items = findings
     .flatMap((f) => {
       if (f.severity === "P3") return [];
-      const position = f.line === null ? null : positionFor(diffs, refs, f.path, f.side, f.line);
-      if (!position && !fallback) return [];
-      const location = !position
-        ? `\n\n位置：${f.path}（${f.side === "new" ? "新" : "旧"}版本${f.line === null ? "，无行号" : `第 ${f.line} 行`}）`
-        : "";
+      const position = null;
+      const location = `\n\n位置：${f.path}（${f.side === "new" ? "新" : "旧"}版本${f.line === null ? "，无行号" : `第 ${f.line} 行`}）`;
       const body = `[${f.severity}] ${f.title}${location}\n\n${f.evidence}\n\n影响：${f.impact}\n\n建议：${f.suggestion}`;
       const actionKey = hash(canonical([instanceKey, projectId, mrIid, refs.head_sha, body, position]));
       return [{ body, position, actionKey, path: f.path, side: f.side, line: f.line }];
@@ -50,10 +43,8 @@ export function severityManifests(
   policyHash: string,
   refs: Refs,
   findings: Finding[],
-  diffs: Diffs,
 ) {
-  const make = (selected: Finding[]) =>
-    manifest(instanceKey, projectId, mrIid, reportHash, policyHash, refs, selected, diffs, true);
+  const make = (selected: Finding[]) => manifest(instanceKey, projectId, mrIid, reportHash, policyHash, refs, selected);
   return {
     automatic: {
       ...make(findings.filter((f) => f.severity === "P0" || f.severity === "P1")),
@@ -61,4 +52,29 @@ export function severityManifests(
     },
     manual: { ...make(findings.filter((f) => f.severity === "P2")), mode: "severity-manual" as const },
   };
+}
+
+export function severityItemsMatch(
+  instanceKey: string,
+  projectId: number,
+  mrIid: number,
+  reportHash: string,
+  policyHash: string,
+  refs: Refs,
+  findings: Finding[],
+  items: unknown[],
+  mode: "manual" | "auto",
+): boolean {
+  const expected = manifest(
+    instanceKey,
+    projectId,
+    mrIid,
+    reportHash,
+    policyHash,
+    refs,
+    findings.filter((f) => (mode === "manual" ? f.severity === "P2" : f.severity === "P0" || f.severity === "P1")),
+  );
+  const allowed = new Set(expected.items.map((item) => canonical(item)));
+  const actual = items.map((item) => canonical(item));
+  return actual.length > 0 && new Set(actual).size === actual.length && actual.every((item) => allowed.has(item));
 }

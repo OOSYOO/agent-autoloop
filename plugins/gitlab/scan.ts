@@ -28,6 +28,15 @@ export async function scanProject(
   for (const mr of mrs) {
     if (!Number.isSafeInteger(mr.iid) || mr.iid <= 0) throw new Error("MR 编号无效");
     const before = io.read(mr.iid);
+    if (
+      before?.delivered === true &&
+      !before.unrouted &&
+      before.instanceKey === config.instanceKey &&
+      before.projectId === project.id &&
+      before.mrIid === mr.iid &&
+      before.headSha === mr.sha
+    )
+      continue;
     const value = {
       instanceKey: config.instanceKey,
       projectId: project.id,
@@ -36,17 +45,19 @@ export async function scanProject(
       policyHash,
       eligible: io.eligible ? await io.eligible(mr) : eligible(mr, config.reviewerId, project.ciMode, []),
     };
-    let next = nextObservation(before, value);
-    const reusableManual =
-      before?.origin === "manual" &&
-      before.delivered === true &&
+    const pendingSameHead =
+      before?.origin === "auto" &&
+      before.eligible &&
+      !before.delivered &&
       !before.unrouted &&
-      Array.isArray(before.overrides) &&
-      before.overrides.length === 0 &&
-      value.eligible &&
-      before.requestId === next.requestId;
+      before.instanceKey === value.instanceKey &&
+      before.projectId === value.projectId &&
+      before.mrIid === value.mrIid &&
+      before.headSha === value.headSha;
+    if (pendingSameHead && !value.eligible) continue;
+    let next = pendingSameHead ? before : nextObservation(before, value);
     if (
-      (before?.origin === "manual" && !reusableManual && before.requestId === next.requestId) ||
+      (before?.origin === "manual" && before.requestId === next.requestId) ||
       (before?.unrouted && io.retryUnrouted && before.requestId === next.requestId)
     )
       next = nextObservation({ ...before, eligible: !before.eligible }, value);
@@ -62,7 +73,7 @@ export async function scanProject(
       projectId: project.id,
       mrIid: mr.iid,
       headSha: mr.sha,
-      policyHash,
+      policyHash: next.policyHash,
       observation: next.observation,
       origin: "auto",
     };

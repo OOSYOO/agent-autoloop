@@ -44,7 +44,7 @@ flowchart LR
         Scan["plugins/gitlab/poll.ts／扫描并登记请求"]
         Review["plugins/gitlab/run.ts + resume.ts／审查与确认后发布"]
         Data["dataRoot/gitlab／请求、报告、发布记录"]
-        Git["裸缓存 + codereview-worktree／Git 对象与可信 main"]
+        Git["裸仓库 + codereview-worktree／可信 main"]
         Codex["plugins/gitlab/codex.ts／启动本机 Codex"]
         Worker -->|"gitlab agent：scan / review"| Scan
         Worker -->|"gitlab agent：review"| Review
@@ -53,13 +53,13 @@ flowchart LR
         Scan -->|"读写请求"| Data
         Review -->|"读写报告与发布记录"| Data
         Scan -->|"trustedRules；nativeBasis"| Git
-        Review -->|"trustedRules；准备 MR Git 对象"| Git
+        Review -->|"trustedRules；准备 main 目录"| Git
         Review -->|"固定 prompt、base/head 与 Git 目录"| Codex
     end
     Rules -.->|"维护时部署副本，不含密钥"| Copy
     Worker -->|"GET /v1/work；POST started/result"| Hub
     Scan -->|"POST /v1/events"| Hub
-    Scan -->|"glab API + git fetch"| GL["GitLab／MR 与 Git 对象"]
+    Scan -->|"glab API + git fetch"| GL["GitLab／MR 元数据"]
     Review -->|"复核 MR；批准后 discussions"| GL
 ```
 
@@ -71,7 +71,7 @@ flowchart LR
 - 服务器：安装与 Mac 对齐的程序版本、Node 24+、Git、glab、Codex；配置原生 Skill 和登录；准备私有数据目录、裸缓存、规则副本和 Worker 服务。
 - 扫描和审查必须同机、同运行账号、同配置及 dataRoot。扫描会读取 nativeBasis、准备可信 main 并保存请求；只迁移 review 会使请求不可见、策略指纹可能不同，不能当成已支持的部署方式。
 - 服务器 capacity=1，使扫描更新 main 工作树与审查不能同时发生。人工 `gitlab scan` 绕过 Worker 排队，运行期间禁止直接启动；需要手动指定 MR 时先确保服务器没有在跑的 scan/review，再执行。
-- 不修改 `kernel/`、HTTP 协议或 GitLab 业务状态机；经用户确认，GitLab 插件增加按指定自动检查判断的 CI 模式，人工审批不阻止开始审查。部署资料补入 `docs/gitlab-review.md`；后续若补远程集成场景，优先扩展已有 `tests/gitlab-integration.test.ts`。
+- 不修改 `kernel/`、HTTP 协议或 GitLab 业务状态机；当前 GitLab 审查与评论发布均不依赖 CI，旧 CI 配置仅兼容读取。部署资料补入 `docs/gitlab-review.md`；后续若补远程集成场景，优先扩展已有 `tests/gitlab-integration.test.ts`。
 
 用户已选择最小改动；集中迁移中台、共享报告存储、自动配置分发会增加本期不需要的生命周期与协议，不作为并行实施方案。未来修复任务可增加独立 Agent 和独立可写目录，不能复用本期会更新到 main 的审查目录；本期不预先增加修复字段。
 
@@ -93,7 +93,7 @@ sequenceDiagram
     H-->>W: Job(scan, run, token, rule)
     W->>P: gitlab agent：scan --config gitlab/config.json
     P->>G: GET user、projects、merge_requests；git fetch main
-    G-->>P: 身份、MR 版本、CI 与 Git 对象
+    G-->>P: 身份、MR 版本（不以 CI 为门槛）
     Note over P: 读取本地规则、原生 Skill，保存 requestId 与 policyHash
     P->>H: POST /v1/events（source token，mr.review.PROJECT_ID）
     H-->>P: event、duplicate、routed
@@ -104,7 +104,7 @@ sequenceDiagram
     W->>R: gitlab agent：review --config gitlab/config.json
     R->>G: 复核身份、MR 与 main；获取缺少的对象
     alt 请求、策略与 Job prompt 匹配
-        Note over R: Codex 在 main 工作树直接读取 MR Git 对象；报告及证据写入 dataRoot
+        Note over R: Codex 在 main 工作树自行读取 MR 链接；报告及证据写入 dataRoot
         R-->>W: findings 通知与人工发布 ask
         W->>H: POST /v1/runs/RUN/result
         C->>H: GET /v1/cards/next
@@ -188,7 +188,7 @@ sequenceDiagram
 | Mac rules.json | 唯一编辑源；仅目标项目 scan/review 的 agents.worker 改为 ek001-139；目标规则 cwd 是服务器绝对路径 |
 | 服务器 rules.json | 从上述规则部署的只读副本，不单独维护第二份业务策略；插件本地读取它，但服务器不运行 Hub |
 | 两端 Agent command | `["scan", "--config", "gitlab/config.json"]` 或 `["review", "--config", "gitlab/config.json"]`；使用相对路径，分别按本机 AGENT_AUTOLOOP_HOME 解析 |
-| 服务器 gitlab/config.json | 沿用 [完整配置定义](../gitlab-review.md)；hubUrl 与 Worker url 一致；只包含归属本服务器的项目；publication=manual；EK001 使用下述 checks 模式，其他项目保持既有 CI 设置 |
+| 服务器 gitlab/config.json | 沿用 [完整配置定义](../gitlab-review.md)；hubUrl 与 Worker url 一致；只包含归属本服务器的项目；publication=manual；所有项目审查与发布均不依赖 CI，旧配置无需修改 |
 | model / effort | 从 GitLab 配置读取，不硬编码新型号；Codex 及 glab 使用服务器可执行程序绝对路径，避免服务 PATH 与交互 shell 不同 |
 | sourceKeyPath | 服务器私有 gitlab 来源密钥文件，0600；不是 Worker token 或 owner token；沿用来源身份，不改变事件类型 |
 | dataRoot / cachePath | 服务器持久磁盘，独立于程序 app；不指向开发者工作目录；每项目一份裸缓存与派生审查目录 |
@@ -200,64 +200,15 @@ sequenceDiagram
 
 ### 仓库内直接审查
 
-用户确认去掉整库文字快照，不设置仓库大小上限。可信 main 工作树仍由 trustedRules 准备；objects.ts 验证 base/start/head 的十六进制 SHA，缺失时从可信 origin 获取 Git 对象，失败直接抛错。run.ts 仅保存 MR 上下文 JSON（schema、gitDir、projectId、mrIid、title、description、baseSha、startSha、headSha），不生成 files/、index.json 或 changes.txt。
+用户确认只需要：准备审查目录，启动原生 Codex，发送配置 prompt 和 MR 链接。插件不下载 versions/diffs、不准备 MR Git 对象、不保存 MR 上下文副本。Codex 自行通过原生工具和 Skill 读取 MR，遵循本轮 head，不检出或执行 MR。模型输出的 complete、executionIssue、findings 保持原约定。
 
-Codex 仍使用原生配置及 Skill，在该 main 工作树通过 `codex exec --json --output-schema ... -o ... -` 执行审查，直接使用固定 Git 对象比较指定 base/head、按需读取文件，不检出 MR。模型结果仍为 complete、executionIssue、findings；资源或必需能力不足时报告执行失败。prompt 不包含 MR 标题、描述或正文，只包含可信规则及资料位置。报告、审计、卡片和发布前复核的协议不变；policyHash 标识更新使旧读取方式的报告和批准失效，不迁移历史事实。
+发布统一使用普通 Discussion，文件和行号保留在正文。版本、策略与授权仍在发布前后核对；旧的行内清单和审查报告不混用，策略为 native-mr-url-v5。Mac 与远端 Worker 使用相同实现。
 
 ### EK001 自动检查与人工审批分开判断
 
-用户已确认：自动检查通过即可开始审查，人工审批未完成不阻止审查；不修改 EK001 的 CI 脚本、审批或合并门槛。最小完整改动是在 GitLab 插件内提供项目级配置，扫描、审查开始/完成、回答接续与逐条评论发布前共用 `plugins/gitlab/ci.ts`。不建设独立 CI 服务，也不修改中台 Job。
+当前准入以 [GitLab Review 方案：取消 CI 门槛](local_agent_automation.md#取消-gitlab-review-的-ci-门槛) 为准：扫描、执行、卡片续办与评论发布均不依赖 CI。旧 ciMode/ciJobs/ciBridges 配置仅兼容读取，不查询 jobs、bridges 或子流水线，不参与新 policyHash。旧章节锚点保留供历史链接访问。
 
-EK001 项目配置增加以下字段，名称来自可信 main 的 `.gitlab-ci.yml`，不是 MR 中的配置：
-
-```json
-{
-  "id": 2,
-  "ciMode": "checks",
-  "ciJobs": ["check_squareline_sync", "build_code", "host_gate"],
-  "ciBridges": ["trigger_board_gate"]
-}
-```
-
-| 字段 | 约束与兼容 |
-|---|---|
-| ciMode | 增加 checks；required / confirmed-none / allow-skipped 及默认值不变 |
-| ciJobs | checks 模式必填非空、不重复的精确 job 名称数组，元素不得为空或带首尾空白；其他模式不允许此字段 |
-| ciBridges | checks 模式可选，缺省为空数组；不重复的精确 bridge 名称，约束同 ciJobs；这里只支持同项目子流水线 |
-| 策略摘要 | checks 模式将两个名称列表纳入 policyHash；CI 配置变化使旧报告与批准失效；名称列表只加入 checks 模式，读取策略统一升级的失效规则见前节 |
-
-当前 MR 必须仍为 opened、非 draft，且本人仍为 reviewer。checks 模式要求 head_pipeline ID 为正整数、SHA 等于当前 MR head；逐项检查 jobs 与 bridges 的 commit SHA、所属 pipeline ID 和 success。要求的名称不存在或不唯一、failed/canceled/skipped/manual/running/pending 均不放行；即使 allow_failure=true，显式列入要求的检查也必须成功。只判断配置列出的检查，新增或改名的 CI 必须同步维护可信配置。
-
-jobs API 使用 `include_retried=false`，取各 job 当前尝试；不以旧的成功尝试覆盖新失败。bridge 成功只代表触发成功，还要读取其 downstream_pipeline 的真实状态，核对同项目、同 SHA、相同 ID 和 success。最后重读 MR，确认最新 head_pipeline ID 与 head 未变化；接口失败不能冒充通过，不新增轮询或重试队列。未列入门槛的人工审批不参与判断，不触发、取消或重试任何 GitLab job。
-
-MR !790 的实测依据：当前 head 为 `5bcff83c86531c24ebe81934f802f14df5382644`，父 pipeline 6018 因 verify_multiple_approvals 取消而为 canceled；build_code、check_squareline_sync、最新 host_gate 均成功，trigger_board_gate 对应子 pipeline 6022 成功。本次验收不使用 --override ci。
-
-```mermaid
-sequenceDiagram
-    participant P as 服务器／poll.ts、run.ts、resume.ts
-    participant C as 服务器／ci.ts
-    participant G as GitLab／只读 API
-    P->>C: eligibleForReview(gl, project, mr, reviewerId, overrides)
-    C->>G: GET /projects/2/pipelines/ID/jobs?include_retried=false
-    G-->>C: 当前尝试的 jobs（分页）
-    C->>G: GET /projects/2/pipelines/ID/bridges
-    G-->>C: bridge 与 downstream_pipeline
-    C->>G: GET /projects/2/pipelines/CHILD_ID
-    G-->>C: 同项目、同 SHA 的子流水线状态
-    C->>G: GET /projects/2/merge_requests/IID
-    G-->>C: 当前 head 与 head_pipeline
-    alt 指定检查均成功且 MR 依据未变
-        C-->>P: true（人工审批不参与）
-    else 缺失、歧义、未完成、失败或版本变化
-        C-->>P: false（不派发或不发布）
-    else API 读取失败
-        C-->>P: 抛出原有 GitLab 读取错误
-    end
-```
-
-外部接口均通过既有 GitLab/glab 身份，只使用 GET，无 body 与附加 Header；projects/ID、pipeline ID、MR IID 来自可信项目与已核对的 API 数据，分页沿用 `GitLab.list`。读取字段为 jobs/bridge 的 name、status、commit.id、pipeline.id，bridge 的 downstream_pipeline.id/project_id/sha，子 pipeline 的 id/project_id/sha/status，以及 MR 的 head_pipeline、sha、state、draft、reviewers。GitLab.list/get 的非 200、网络和限流处理见 [api.ts](../../plugins/gitlab/api.ts)，正式接口见 [Jobs API](https://docs.gitlab.com/api/jobs/) 与 [Pipelines API](https://docs.gitlab.com/api/pipelines/)。本实例已实测支持 bridges；不因新版接口改名而引入猜测式降级。
-
-配置属于 GitLab 插件对部署者的新增契约；旧插件不能识别 checks，因此先升级两端到支持版本，再部署 EK001 配置。撤回新模式时先停扫描并排空轮次，改回 required 后重新扫描，不复用 checks 下的批准。其他项目无须适配。
+升级必须覆盖所有扫描、审查与发布 Worker，不修改 GitLab 项目自身 CI、审批或合并要求。状态、草稿、Reviewer（飞书委托除外）、版本与发布授权仍复核。历史真实检查结果只作既往部署证据，不构成当前门槛。
 
 ### 网络与服务运行
 
@@ -268,6 +219,7 @@ sequenceDiagram
 Linux 可复用 [host/service.ts](../../host/service.ts) 的 systemd 用户服务；必须实际验证用户退出登录后仍运行，不能把用户服务安装成功当作常驻证明。已核实的依赖、认证和用户会话条件见下方探查记录；不假设服务器已有 Mac 的 Skill、MCP 或桌面连接。
 
 现有 GitLab 插件使用 Codex 原生配置，不额外提供系统沙箱。“只读审查”是任务约束。首期经用户确认使用现有 shenyue 账号下的独立目录减少与开发环境交叉，不赋予生产部署权限；不承诺该插件隔离了账号能读取的所有秘密。
+
 
 ## 接入与回退
 
@@ -288,11 +240,11 @@ Linux 可复用 [host/service.ts](../../host/service.ts) 的 systemd 用户服�
 |---|---|---|---|
 | 远程领活与人工回答回到原 Worker | L1 | tests/gitlab-integration.test.ts 与 tests/worker.test.ts：Hub 与 Worker 使用独立临时 HOME | 目标 worker 收到 scan/review，answers-only 从服务器报告恢复；保留 run、worker 与请求记录路径 |
 | 扫描与审查使用同一依据 | L1 | tests/gitlab-native.test.ts、tests/gitlab-instructions.test.ts；tests/gitlab-integration.test.ts 双 HOME 场景 | 改服务器 Skill 或 prompt 会使旧依据失效；Mac 不需要目标仓库缓存；保留测试名与退出码 |
-| 只读 Git 对象及目录安全 | L1 | tests/gitlab-objects.test.ts、tests/gitlab-worktree.test.ts、tests/gitlab-integration.test.ts | MR 指令不作为规则；脏审查目录拒绝覆盖；开发目录无变化；保留测试断言与退出码 |
+| 只读 Git 对象及目录安全 | L1 | tests/gitlab-manifest.test.ts、tests/gitlab-worktree.test.ts、tests/gitlab-integration.test.ts | MR 指令不作为规则；脏审查目录拒绝覆盖；开发目录无变化；保留测试断言与退出码 |
 | 人工确认后才发布且旧批准失效 | L1 | tests/gitlab-review.test.ts、tests/gitlab-publish.test.ts、tests/gitlab-answer.test.ts | 使用假 GitLab；确认前无写入，版本变化不发布，响应丢失不重复发；保留请求日志 |
 | 断网、重启与结果恢复 | L1 | tests/worker.test.ts；tests/worker.test.ts 双进程 Hub 断开场景 | 结果在服务器落盘，重连不重做业务；保留 run ID、调用计数和回执 |
 | 停止进程组与 capacity=1 | L1 | tests/worker.test.ts | 子进程全部结束后上报取消，扫描与审查最多一轮执行；保留测试名与退出码 |
-| 自动检查与审批分离 | L1 | tests/gitlab-ci.test.ts、tests/gitlab-integration.test.ts | 父审批取消不阻止已通过检查的审查；缺失、歧义、失败、跳过、旧 SHA、查询期间切换 pipeline 和子流水线失败不放行；批准后子流水线失效不写评论 |
+| 自动检查与审批分离 | L1 | tests/gitlab-ci.test.ts、tests/gitlab-integration.test.ts | 各种 CI 状态均不阻止审查或批准后发布；不查询流水线端点；版本、身份、草稿和授权仍核对 |
 | 服务器真实运行环境 | L3 | 服务器 gitlab check、check、service install；Mac status；服务日志 | 相同程序版本、账号与 Skill 可用，断开管理登录后仍可领活；记录版本、worker 名和服务状态，不保存密钥 |
 | 实际远程审查 | L3 | 获准测试 MR 的 gitlab scan --mr；Mac status 与服务器审计报告 | 报告关联实际 main/MR SHA、prompt 与模型结果；Mac 无本地审查进程；真实服务和模型证据齐全 |
 | 单项目切换与恢复 | L3 | 维护窗口核对两端规则、配置、status 和请求记录 | 同一项目仅一个活动扫描入口，切换前无未收尾轮次或批准，回退无并行执行；保存脱敏配置差异 |
@@ -319,6 +271,6 @@ Linux 可复用 [host/service.ts](../../host/service.ts) 的 systemd 用户服�
 | 通道与评论 | Mac 原飞书通道已送达确认卡 #16，delivery 有 ref 且 error=null；服务器无通道。GitLab 写入动作记录为 0，未代替用户回答 |
 | 单一归属与回退前提 | EK001 是新增接入，接入前 Mac 没有该项目，因此既有项目迁移/回退场景不适用；已实测两端规则一致、仅一条 scan、均派给 ek001-139；删去新增路由可还原接入前配置，未干扰待确认卡做真实回退 |
 
-已采用的简化是删除整库文字转换：objects.ts 只准备固定 base/start/head 的 Git 对象，run.ts 传入 Git 目录和版本 JSON，Codex 在可信 main 工作树中按需读取完整对象。保留 MR 指令隔离和原有结构化报告接口，不检出或运行 MR。取消原 128 MiB 总量限制；磁盘、对象读取或模型运行不足时按实际失败处理，不截断。策略标识升级至 native-git-objects-v4，旧报告和批准不混用。Mac 和 Linux 部署相同实现。
+上述真实实测记录对应早期 Git 对象方案，仅保留历史证据。当前实现按用户后续裁决改为 prompt + MR 链接，不再预处理 MR 内容；实际切换记录以本次交付为准。
 
 部署前的逐次探查、已删除 worktree 的完整提交、配置备份和预检记录保存在本人私有部署目录，不包含在仓库。模型真实报告已验证，日常扫描已启用；最终安装来源与远端 CI 由交付报告记录。真实评论写入未验收，保留人工批准边界。

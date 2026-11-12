@@ -29,7 +29,6 @@ export function selectRequest(
   events: { detail: string }[],
   stored: Request[],
   head: string,
-  policy: string,
   projectId: number,
   mrIid: number,
 ): Request | null {
@@ -46,7 +45,6 @@ export function selectRequest(
       parsed.projectId === projectId &&
       parsed.mrIid === mrIid &&
       parsed.headSha === head &&
-      parsed.policyHash === policy &&
       stored.some((r) => request(r) && canonical(r) === canonical(parsed))
     )
       matches.push(parsed);
@@ -59,15 +57,13 @@ export function obsoleteCards(
   projectId: number,
   mrIid: number,
   head: string,
-  policy?: string,
 ): { card: number; reason: string }[] {
   return open.flatMap((card) => {
     if (card.title !== "确认发布审查评论") return [];
     const match = /^MR (\d+)\/(\d+)，版本 ([a-f0-9]{40})，/.exec(card.text);
     if (!match || Number(match[1]) !== projectId || Number(match[2]) !== mrIid) return [];
     if (match[3] !== head) return [{ card: card.card, reason: "MR 版本已变化" }];
-    const oldPolicy = /，策略 ([a-f0-9]{64})，/.exec(card.text)?.[1];
-    return policy && oldPolicy && oldPolicy !== policy ? [{ card: card.card, reason: "MR 版本或审查策略已变化" }] : [];
+    return [];
   });
 }
 export function eventMatches(

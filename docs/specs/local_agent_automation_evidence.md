@@ -41,3 +41,10 @@
 - `severity`：P0/P1 自动发布且不发正常飞书通知；P2 独立确认；P3 只通知；零发现提示继续人工审核。无 Diff 行号时使用普通 Discussion。混合报告与回答续办用假 GitLab/通道端到端验证。
 - 重审依据只采集 prompt 指定的原生 Skill 和指令相关配置；无关插件升级、项目信任列表变化不改变摘要。指定 Skill 正文及目录内引用变化仍失效。
 - 377 项 quick 测试通过；typecheck、format:check、diff 检查通过。首次 quick 有一条既有 Worker 时序测试失败，单独 Worker 24/24、随后整套 377/377 通过。验证没有发送真实消息或创建真实 MR。
+
+
+## 2026-11-06：原生 MR 链接调用
+
+最终调用收敛为 main 工作目录中的原生 Codex，输入可信 prompt、MR URL 和当前 head。移除插件的 versions/diffs 请求、MR 对象准备、上下文副本及 Diff 完整性/三元组门槛。发布为普通 Discussion，正文保留文件和行号，仍核对 head、main/策略、CI 和授权。
+
+先复现 too_large 和 diff_refs=null 的阻断，再以假 GitLab 禁止所有 versions 请求验证审查及发布均成功。377 项 test:quick、typecheck、format:check 和 diff 检查通过。未使用真实评论或消息作为测试。

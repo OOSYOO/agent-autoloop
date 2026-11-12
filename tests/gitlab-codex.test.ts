@@ -171,3 +171,43 @@ test("an explicitly incomplete model review has its own safe failure category", 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("completed Codex output with a summary keeps raw audit and normalizes the parsed report", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { runCodex } = await import("../plugins/gitlab/codex.ts");
+  const root = mkdtempSync(join(tmpdir(), "codex-summary-"));
+  try {
+    const cwd = join(root, "cwd"),
+      audit = join(root, "audit"),
+      fake = join(root, "codex");
+    mkdirSync(cwd);
+    const payload = {
+      complete: true,
+      executionIssue: "完成审查",
+      findings: [
+        {
+          severity: "P2",
+          title: "问题",
+          evidence: "证据",
+          impact: "影响",
+          suggestion: "建议",
+          path: "a.ts",
+          side: "new",
+          line: 1,
+        },
+      ],
+    };
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;fs.writeFileSync(a[a.indexOf('-o')+1],${JSON.stringify(JSON.stringify(payload))});console.log('{"type":"turn.completed"}');`,
+      { mode: 0o700 },
+    );
+    const result = await runCodex(fake, cwd, "model", undefined, "instruction", audit);
+    assert.deepEqual(result.report, { ...payload, executionIssue: "" });
+    assert.deepEqual(JSON.parse(readFileSync(join(audit, result.audit, "output.json"), "utf8")), payload);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

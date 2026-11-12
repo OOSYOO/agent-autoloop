@@ -2,21 +2,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Job } from "../../protocol/job.ts";
 import type { Config } from "./config.ts";
-import { loadConfig, policyHash } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { publishDecision } from "./answer.ts";
 import { loadArtifact } from "./artifacts.ts";
 import { atomicFile, canonical, hash } from "./storage.ts";
 import { GitLab } from "./api.ts";
 import { readRequests } from "./request.ts";
-import { trustedRules, verifyProjectRemote } from "./trusted-rules.ts";
+import { verifyProjectRemote } from "./trusted-rules.ts";
 import { manualOverrides } from "./manual.ts";
 import { eligibleForReview } from "./ci.ts";
-import { positionFor } from "./diff.ts";
 import { requiresComparison } from "./auto.ts";
 import { publishOne } from "./publish.ts";
-import { HOME, RULES_FILE } from "../../host/home.ts";
-import { loadInstructions, checkJobRule } from "./instructions.ts";
-import { nativeBasis } from "./native.ts";
+import { severityItemsMatch } from "./manifest.ts";
+import { parseModelReport } from "./report.ts";
 
 export async function resumeAnswer(
   config: Config,
@@ -69,6 +67,11 @@ async function publishManifest(
     throw new Error("报告与确认内容不一致");
   const project = config.projects.find((p) => p.id === report.projectId);
   if (!project || !Number.isSafeInteger(report.mrIid) || report.mrIid <= 0) throw new Error("报告项目无效");
+  if (
+    (report.instanceUrl !== undefined && report.instanceUrl !== config.instanceUrl) ||
+    (report.projectPath !== undefined && report.projectPath !== project.projectPath)
+  )
+    return "stale";
   const decisionPath = join(root, "decisions", `${manifestHash}.json`);
   const saved = existsSync(decisionPath);
   if (saved) {
@@ -87,22 +90,30 @@ async function publishManifest(
       );
     return "rejected";
   }
-  if (typeof report.instructionsDigest !== "string") return "stale";
+  if (project.publication === "severity") {
+    const findings = parseModelReport(
+      JSON.stringify({ complete: report.complete, executionIssue: report.executionIssue, findings: report.findings }),
+    ).findings;
+    const mode = man.mode === "severity-auto" ? "auto" : "manual";
+    if (
+      ![undefined, "severity-auto", "severity-manual"].includes(man.mode) ||
+      !severityItemsMatch(
+        config.instanceKey,
+        project.id,
+        report.mrIid,
+        man.reportHash,
+        man.policyHash,
+        { head_sha: report.headSha },
+        findings,
+        man.items,
+        mode,
+      )
+    )
+      return "stale";
+  }
   if (!configFile) throw new Error("缺少可信配置路径");
-  const instructions = loadInstructions(configFile, project.id, HOME, RULES_FILE);
-  if (report.instructions?.prompt !== instructions.prompt || report.model !== config.model) return "stale";
-  if (contextFile) checkJobRule(contextFile, instructions);
   const gl = new GitLab(config.glabPath, config.instanceUrl);
   await verifyProjectRemote(gl, project);
-  const trusted = trustedRules(project);
-  const native = await nativeBasis(config.codexPath, trusted.worktree, instructions.prompt);
-  const instructionsDigest = hash(canonical({ prompt: instructions.prompt, native: native.digest }));
-  if (
-    report.instructionsDigest !== instructionsDigest ||
-    report.model !== config.model ||
-    policyHash(config, project, instructionsDigest, trusted.digest) !== man.policyHash
-  )
-    return "stale";
   if (!saved && answer)
     atomicFile(
       decisionPath,
@@ -115,7 +126,13 @@ async function publishManifest(
     !(project.publication === "severity" && man.mode === "severity-auto")
   )
     throw new Error("未获发布授权");
-  if (project.publication === "severity" && !["severity-auto", "severity-manual"].includes(man.mode)) return "stale";
+  if (
+    project.publication === "severity" &&
+    !["severity-auto", "severity-manual"].includes(man.mode) &&
+    !answer &&
+    !saved
+  )
+    return "stale";
   if (project.publication === "severity" && man.mode === "severity-auto" && answer)
     throw new Error("自动发布清单不能由人工批准");
   const user = (await gl.get("user")) as any;
@@ -128,34 +145,62 @@ async function publishManifest(
     requiresComparison(await gl.list(`${path}/discussions?per_page=100`), config.reviewerId, report.headSha)
   )
     return "comparison";
-  const request = readRequests(root, project.id, report.mrIid).find((record) => record.requestId === report.requestId);
-  if (!request || request.headSha !== report.headSha || request.policyHash !== report.policyHash)
+  const requestId = man.requestId ?? report.requestId;
+  const request = readRequests(root, project.id, report.mrIid).find((record) => record.requestId === requestId);
+  if (!request || request.instanceKey !== config.instanceKey || request.headSha !== report.headSha)
     throw new Error("原审查请求记录缺失或不一致");
-  const overrides = manualOverrides(request, report.requestId, config.reviewerId);
   const current = async () => {
     const latest = configFile ? loadConfig(configFile) : config;
     const currentProject = latest.projects.find((item) => item.id === project.id);
-    if (!currentProject) return false;
-    const currentGl = new GitLab(latest.glabPath, latest.instanceUrl);
-    await verifyProjectRemote(currentGl, currentProject);
-    const currentInstructions = loadInstructions(configFile, currentProject.id, HOME, RULES_FILE);
-    const currentMain = trustedRules(currentProject);
-    const currentNative = await nativeBasis(latest.codexPath, currentMain.worktree, currentInstructions.prompt);
-    const currentInstructionsDigest = hash(
-      canonical({ prompt: currentInstructions.prompt, native: currentNative.digest }),
-    );
     if (
-      currentInstructionsDigest !== instructionsDigest ||
-      policyHash(latest, currentProject, currentInstructionsDigest, currentMain.digest) !== man.policyHash
+      !currentProject ||
+      latest.instanceKey !== config.instanceKey ||
+      latest.instanceUrl !== config.instanceUrl ||
+      currentProject.projectPath !== project.projectPath
     )
       return false;
+    const currentGl = new GitLab(latest.glabPath, latest.instanceUrl);
+    await verifyProjectRemote(currentGl, currentProject);
+    const currentUser = (await currentGl.get("user")) as { id?: number };
+    if (currentUser?.id !== latest.reviewerId) return false;
+    if (
+      !answer &&
+      !saved &&
+      !(
+        currentProject.publication === "auto" ||
+        (currentProject.publication === "severity" && man.mode === "severity-auto")
+      )
+    )
+      return false;
+    if (currentProject.publication === "severity") {
+      const findings = parseModelReport(
+        JSON.stringify({ complete: report.complete, executionIssue: report.executionIssue, findings: report.findings }),
+      ).findings;
+      const mode = man.mode === "severity-auto" ? "auto" : "manual";
+      if (
+        !severityItemsMatch(
+          latest.instanceKey,
+          currentProject.id,
+          report.mrIid,
+          man.reportHash,
+          man.policyHash,
+          { head_sha: report.headSha },
+          findings,
+          man.items,
+          mode,
+        )
+      )
+        return false;
+    }
     const mr = (await currentGl.get(path)) as any;
     return (
-      (await eligibleForReview(currentGl, currentProject, mr, latest.reviewerId, overrides)) &&
-      mr.sha === report.headSha &&
-      mr.diff_refs?.head_sha === report.headSha &&
-      mr.diff_refs?.base_sha === report.baseSha &&
-      mr.diff_refs?.start_sha === report.startSha
+      (await eligibleForReview(
+        currentGl,
+        currentProject,
+        mr,
+        latest.reviewerId,
+        manualOverrides(request, requestId, latest.reviewerId),
+      )) && mr.sha === report.headSha
     );
   };
   if (!(await current()))
@@ -172,52 +217,14 @@ async function publishManifest(
     )
       ? "sent-stale"
       : "stale";
-  const versions = await gl.list(`${path}/versions?per_page=100`);
-  const matches = versions.filter(
-    (v: any) =>
-      v.head_commit_sha === report.headSha &&
-      v.base_commit_sha === report.baseSha &&
-      v.start_commit_sha === report.startSha,
-  ) as any[];
-  if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id)) throw new Error("无法确认 Diff 版本");
-  const version = (await gl.get(`${path}/versions/${matches[0].id}`)) as any;
-  if (
-    version.head_commit_sha !== report.headSha ||
-    version.base_commit_sha !== report.baseSha ||
-    version.start_commit_sha !== report.startSha ||
-    !Array.isArray(version.diffs) ||
-    version.diffs.some((d: any) => d.collapsed || d.too_large || typeof d.diff !== "string")
-  )
-    throw new Error("Diff 不完整");
-  const refs = { base_sha: report.baseSha, start_sha: report.startSha, head_sha: report.headSha };
   for (const item of man.items) {
+    if (!item || typeof item.body !== "string" || typeof item.actionKey !== "string") throw new Error("待发布内容无效");
+    if (item.position !== null) return "stale";
     if (
-      !item ||
-      typeof item.body !== "string" ||
-      (item.position === null && project.publication !== "severity") ||
-      typeof item.actionKey !== "string"
+      hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, null])) !==
+      item.actionKey
     )
-      throw new Error("待发布内容无效");
-    const p = item.position;
-    if (p === null) {
-      if (
-        hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, null])) !==
-        item.actionKey
-      )
-        throw new Error("评论内容已变化");
-      continue;
-    }
-    if (!p || typeof p !== "object") throw new Error("评论位置无效");
-    const side = p.new_line !== undefined ? "new" : "old",
-      line = side === "new" ? p.new_line : p.old_line,
-      path = side === "new" ? p.new_path : p.old_path;
-    const position = positionFor(version.diffs, refs, path, side, line);
-    if (
-      !position ||
-      canonical(position) !== canonical(p) ||
-      hash(canonical([config.instanceKey, project.id, report.mrIid, report.headSha, item.body, p])) !== item.actionKey
-    )
-      throw new Error("评论位置或内容已变化");
+      throw new Error("评论内容已变化");
   }
   for (const item of man.items) {
     const body = `${item.body}\n\n由 agent-autoloop 生成。\n<!-- agent-autoloop:action=${item.actionKey} -->`;
@@ -227,38 +234,16 @@ async function publishManifest(
         const discussions = await gl.list(`${path}/discussions?per_page=100`);
         for (const discussion of discussions as any[])
           for (const note of discussion.notes ?? []) {
-            if (
-              note.author?.id !== config.reviewerId ||
-              note.body !== body ||
-              (item.position === null ? note.position != null : !note.position)
-            )
-              continue;
-            const position =
-              item.position === null
-                ? null
-                : Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
-            if (
-              canonical(position) === canonical(item.position) &&
-              typeof discussion.id === "string" &&
-              Number.isSafeInteger(note.id)
-            )
-              return { discussionId: discussion.id, noteId: note.id, position };
+            if (note.author?.id !== config.reviewerId || note.body !== body || note.position != null) continue;
+            if (typeof discussion.id === "string" && Number.isSafeInteger(note.id))
+              return { discussionId: discussion.id, noteId: note.id, position: null };
           }
         return null;
       },
       post: async () => {
-        const result = (await gl.post(
-          `${path}/discussions`,
-          item.position === null ? { body } : { body, position: item.position },
-        )) as any;
+        const result = (await gl.post(`${path}/discussions`, { body })) as any;
         const note = result?.notes?.[0];
-        const position =
-          item.position === null
-            ? note?.position == null
-              ? null
-              : note.position
-            : note?.position && Object.fromEntries(Object.keys(item.position).map((key) => [key, note.position[key]]));
-        return { discussionId: result?.id, noteId: note?.id, position };
+        return { discussionId: result?.id, noteId: note?.id, position: note?.position ?? null };
       },
     });
     if (result !== "sent") return result;

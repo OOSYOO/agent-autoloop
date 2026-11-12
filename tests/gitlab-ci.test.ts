@@ -1,113 +1,60 @@
-// Failure modes: an approval job prevents review after tests pass; old, missing, retried or unfinished checks
-// permit review or publication; a successful trigger hides a failing child pipeline; config changes reuse approval.
+// Failure modes: CI still blocks review or publication; obsolete CI settings change report identity;
+// removing CI accidentally bypasses MR state, reviewer, draft or head validation.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { eligibleForReview } from "../plugins/gitlab/ci.ts";
 import { parseConfig, policyHash } from "../plugins/gitlab/config.ts";
 const sha = "a".repeat(40);
 const project = { id: 2, ciMode: "checks" as const, ciJobs: ["build", "host"], ciBridges: ["board"] };
-function fixture() {
-  const mr = {
-    iid: 790,
-    state: "opened",
-    draft: false,
-    sha,
-    reviewers: [{ id: 8 }],
-    head_pipeline: { id: 10, sha, status: "canceled" },
-  };
-  const job = (name: string, id: number) => ({
-    id,
-    name,
-    status: "success",
-    commit: { id: sha },
-    pipeline: { id: 10 },
-  });
-  const jobs = [job("build", 1), job("host", 2), { ...job("approval", 3), status: "canceled" }];
-  const bridge = { ...job("board", 4), downstream_pipeline: { id: 11, project_id: 2, sha, status: "success" } };
-  const child = { id: 11, project_id: 2, sha, status: "success" };
-  const calls: string[] = [];
-  const gl = {
-    async list(path: string) {
-      calls.push(path);
-      return path.includes("/bridges?") ? [bridge] : jobs;
-    },
-    async get(path: string) {
-      calls.push(path);
-      return path.endsWith("/790") ? mr : child;
-    },
-  };
-  return { mr, jobs, bridge, child, gl, calls };
-}
-test("configured checks allow review before human approval, and verify the actual child", async () => {
-  const f = fixture();
-  assert.equal(await eligibleForReview(f.gl, project, f.mr, 8, []), true);
-  assert.ok(f.calls.includes("projects/2/pipelines/11"));
-  assert.ok(f.calls.some((p) => p.includes("include_retried=false")));
-  f.jobs.push({ ...f.jobs[0], id: 5, status: "failed" });
+const mr = () => ({ iid: 790, state: "opened", draft: false, sha, reviewers: [{ id: 8 }] });
+const noCI = {
+  async list(): Promise<unknown[]> {
+    assert.fail("CI endpoints must not be queried");
+  },
+  async get(): Promise<unknown> {
+    assert.fail("CI endpoints must not be queried");
+  },
+};
+test("all legacy modes ignore CI states, missing pipelines and stale pipeline SHAs without fetching checks", async () => {
+  for (const ciMode of ["required", "confirmed-none", "allow-skipped", "checks"] as const) {
+    for (const pipeline of [
+      undefined,
+      null,
+      ...["success", "failed", "canceled", "skipped", "manual", "running", "pending"].map((status) => ({
+        id: 10,
+        sha: "b".repeat(40),
+        status,
+      })),
+    ]) {
+      const current = { ...mr(), ...(pipeline === undefined ? {} : { head_pipeline: pipeline }) };
+      assert.equal(
+        await eligibleForReview(noCI, { ...project, ciMode }, current, 8, []),
+        true,
+        `${ciMode}: ${JSON.stringify(pipeline)}`,
+      );
+    }
+  }
+});
+test("CI removal preserves closed, draft, reviewer and head checks and historical overrides", async () => {
+  for (const change of [
+    { state: "closed" },
+    { state: "merged" },
+    { draft: true },
+    { reviewers: [] },
+    { sha: "invalid" },
+    { draft: undefined },
+    { reviewers: undefined },
+  ]) {
+    assert.equal(await eligibleForReview(noCI, project, { ...mr(), ...change }, 8, []), false);
+  }
+  assert.equal(await eligibleForReview(noCI, project, { ...mr(), draft: true, reviewers: [] }, 8, ["ci"]), false);
+  assert.equal(await eligibleForReview(noCI, project, { ...mr(), reviewers: [] }, 8, ["reviewer", "ci"]), true);
   assert.equal(
-    await eligibleForReview(f.gl, project, f.mr, 8, []),
+    await eligibleForReview(noCI, project, { ...mr(), state: "closed" }, 8, ["reviewer", "draft", "ci"]),
     false,
-    "ambiguous duplicate names cannot hide failures",
   );
 });
-test("required checks never accept missing, failed, skipped, running or old jobs", async () => {
-  for (const status of ["failed", "canceled", "skipped", "manual", "running", "pending"]) {
-    const f = fixture();
-    f.jobs[1].status = status;
-    assert.equal(await eligibleForReview(f.gl, project, f.mr, 8, []), false, status);
-  }
-  const missing = fixture();
-  missing.jobs.splice(1, 1);
-  assert.equal(await eligibleForReview(missing.gl, project, missing.mr, 8, []), false);
-  const old = fixture();
-  old.jobs[1].commit.id = "b".repeat(40);
-  assert.equal(await eligibleForReview(old.gl, project, old.mr, 8, []), false);
-  const wrongPipeline = fixture();
-  wrongPipeline.jobs[1].pipeline.id = 9;
-  assert.equal(await eligibleForReview(wrongPipeline.gl, project, wrongPipeline.mr, 8, []), false);
-});
-test("child failure, stale SHA and a changed latest pipeline reject old eligibility", async () => {
-  for (const status of ["failed", "running", "skipped", "canceled"]) {
-    const f = fixture();
-    f.child.status = status;
-    assert.equal(await eligibleForReview(f.gl, project, f.mr, 8, []), false, status);
-  }
-  const old = fixture();
-  old.child.sha = "b".repeat(40);
-  assert.equal(await eligibleForReview(old.gl, project, old.mr, 8, []), false);
-  const changed = fixture();
-  const original = structuredClone(changed.mr);
-  changed.mr.head_pipeline.id = 12;
-  assert.equal(await eligibleForReview(changed.gl, project, original, 8, []), false);
-  const draft = fixture();
-  draft.mr.draft = true;
-  assert.equal(await eligibleForReview(draft.gl, project, draft.mr, 8, []), false);
-  const missingChild = fixture();
-  missingChild.bridge.downstream_pipeline = null as any;
-  assert.equal(await eligibleForReview(missingChild.gl, project, missingChild.mr, 8, []), false);
-});
-test("legacy projects do not fetch checks, and API failures cannot become success", async () => {
-  const f = fixture();
-  f.mr.head_pipeline.status = "success";
-  assert.equal(await eligibleForReview(f.gl, { id: 2, ciMode: "required" }, f.mr, 8, []), true);
-  assert.equal(f.calls.length, 0);
-  await assert.rejects(
-    eligibleForReview(
-      {
-        ...f.gl,
-        list: async () => {
-          throw Error("offline");
-        },
-      },
-      project,
-      f.mr,
-      8,
-      [],
-    ),
-    /offline/,
-  );
-});
-test("check configuration is explicit, validated and part of the policy fingerprint", () => {
+test("legacy check settings remain validated but do not affect new policy fingerprints", () => {
   const raw = {
     schema: 1,
     instanceKey: "work",
@@ -122,8 +69,8 @@ test("check configuration is explicit, validated and part of the policy fingerpr
     projects: [{ ...project, cachePath: "/cache" }],
   };
   const a = parseConfig(raw),
-    b = parseConfig({ ...raw, projects: [{ ...raw.projects[0], ciJobs: ["other"] }] });
-  assert.notEqual(policyHash(a, a.projects[0], "rules"), policyHash(b, b.projects[0], "rules"));
+    b = parseConfig({ ...raw, projects: [{ ...raw.projects[0], ciJobs: ["other"], ciBridges: [] }] });
+  assert.equal(policyHash(a, a.projects[0], "rules"), policyHash(b, b.projects[0], "rules"));
   for (const change of [
     { ciJobs: [] },
     { ciJobs: ["host", "host"] },
