@@ -45,11 +45,13 @@ export async function adapterFor(use: string): Promise<Adapter> {
   return adapter;
 }
 
-const found = new Map<string, string | null>();
+// Updates can briefly remove a program; caching that miss would fail every later run until restart.
+const found = new Map<string, string>();
 
 /** Where a program is: on the login shell's PATH (launchd and systemd start with a bare one), or in one of these. */
 export function findProgram(name: string, elsewhere: () => string[] = () => []) {
-  if (!found.has(name)) {
+  let program = found.get(name);
+  if (!program) {
     const shell = process.env.SHELL ?? "/bin/sh";
     let onPath: string | null = null;
     try {
@@ -60,10 +62,10 @@ export function findProgram(name: string, elsewhere: () => string[] = () => []) 
       });
       onPath = printed.trim().split("\n").at(-1) || null;
     } catch {}
-    found.set(name, onPath ?? elsewhere().find(existsSync) ?? null);
+    program = onPath ?? elsewhere().find(existsSync);
+    if (!program) throw new Error(`找不到 ${name}：先装好并登录`);
+    found.set(name, program);
   }
-  const program = found.get(name);
-  if (!program) throw new Error(`找不到 ${name}：先装好并登录`);
   return program;
 }
 

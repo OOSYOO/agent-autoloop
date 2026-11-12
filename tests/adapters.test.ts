@@ -1,3 +1,4 @@
+// Failure mode: a temporarily missing program stays unavailable until the worker restarts.
 // Failure mode: a Codex reconnect error incorrectly fails a subsequently completed turn.
 // What's different about each agent. Failure cases: a level of access maps to the wrong flag, full access is given unasked,
 // a retry starts a new conversation instead of going on, an error or a turn that never finished counts as an answer, a
@@ -177,3 +178,14 @@ test("a plain command: placeholders filled in, stdout is its last message, a bad
 test("a program that isn't there says so", () => {
   assert.throws(() => findProgram("surely-not-installed-anywhere"), /找不到 surely-not-installed-anywhere/);
 });
+
+test("a program missing at one lookup is found at the next once it's back", () => {
+  const program = join(setup("adapters-reinstall"), "reinstalled-agent");
+  assert.throws(() => findProgram("reinstalled-agent", () => [program]), /找不到 reinstalled-agent/);
+  writeFileSync(program, "", { mode: 0o755 });
+  assert.equal(
+    findProgram("reinstalled-agent", () => [program]),
+    program,
+  );
+});
+
