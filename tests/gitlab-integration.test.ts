@@ -232,39 +232,6 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(join(root, "entry.json"), JSON.stringify({ job: { rule: job.rule } }));
     const file = join(root, "config.json");
     writeFileSync(file, JSON.stringify(raw));
-    const executeTerminal = () =>
-      spawnSync(process.execPath, [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          HOME: root,
-          AGENT_AUTOLOOP_HOME: root,
-          AGENT_AUTOLOOP_RULES: rulesPath,
-          AGENT_AUTOLOOP_CONTEXT: context,
-          AGENT_AUTOLOOP_RUN: "1",
-        },
-      });
-    for (const state of ["merged", "closed"]) {
-      writeFileSync(mrFile, JSON.stringify({ ...mr, state }));
-      const result = executeTerminal();
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(readMessage(result.stdout).outcome, "nothing");
-      assert.match(result.stdout, /已合并或关闭/);
-      assert.equal(existsSync(join(root, "gitlab/reports")), false, "no model report for completed MR");
-      assert.equal(existsSync(join(root, "posts.log")), false);
-    }
-    for (const state of ["merged", "closed"]) {
-      writeFileSync(mrFile, JSON.stringify(mr));
-      writeFileSync(join(root, "change-mr"), state);
-      const result = executeTerminal();
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(readMessage(result.stdout).outcome, "nothing");
-      assert.match(result.stdout, /已合并或关闭/);
-      assert.ok(readdirSync(join(root, "gitlab/reports")).length, "report retained if MR finishes during analysis");
-      assert.equal(existsSync(join(root, "posts.log")), false);
-      rmSync(join(root, "gitlab/reports"), { recursive: true });
-    }
-    writeFileSync(mrFile, JSON.stringify(mr));
     const originalRulesForRace = readFileSync(rulesPath, "utf8");
     const staleRules = JSON.parse(originalRulesForRace);
     staleRules.rules[0].prompt = "服务器旧 prompt";
@@ -1327,6 +1294,46 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         `automatic publication stopped after changing to ${target}`,
       );
     }
+    // Keep synchronous terminal probes after the Hub HTTP dialogue; they must not extend idle socket reuse.
+    writeFileSync(file, JSON.stringify(raw));
+    writeFileSync(rulesPath, originalRulesForRace);
+    writeFileSync(context, JSON.stringify(job.context));
+    writeFileSync(join(root, "entry.json"), JSON.stringify({ job: { rule: job.rule } }));
+    rmSync(join(root, "gitlab/reports"), { recursive: true, force: true });
+    const executeTerminal = () =>
+      spawnSync(process.execPath, [resolve("plugins/gitlab/run.ts"), "--config", file, "--model", "model"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: root,
+          AGENT_AUTOLOOP_HOME: root,
+          AGENT_AUTOLOOP_RULES: rulesPath,
+          AGENT_AUTOLOOP_CONTEXT: context,
+          AGENT_AUTOLOOP_RUN: "1",
+        },
+      });
+    const terminalPostsBefore = readFileSync(join(root, "posts.log"), "utf8");
+    for (const state of ["merged", "closed"]) {
+      writeFileSync(mrFile, JSON.stringify({ ...mr, state }));
+      const result = executeTerminal();
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readMessage(result.stdout).outcome, "nothing");
+      assert.match(result.stdout, /已合并或关闭/);
+      assert.equal(existsSync(join(root, "gitlab/reports")), false, "no model report for completed MR");
+      assert.equal(readFileSync(join(root, "posts.log"), "utf8"), terminalPostsBefore);
+    }
+    for (const state of ["merged", "closed"]) {
+      writeFileSync(mrFile, JSON.stringify(mr));
+      writeFileSync(join(root, "change-mr"), state);
+      const result = executeTerminal();
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readMessage(result.stdout).outcome, "nothing");
+      assert.match(result.stdout, /已合并或关闭/);
+      assert.ok(readdirSync(join(root, "gitlab/reports")).length, "report retained if MR finishes during analysis");
+      assert.equal(readFileSync(join(root, "posts.log"), "utf8"), terminalPostsBefore);
+      rmSync(join(root, "gitlab/reports"), { recursive: true });
+    }
+    writeFileSync(mrFile, JSON.stringify(mr));
     assert.equal(existsSync(join(root, "unexpected-versions")), false);
   } finally {
     if (server) {
