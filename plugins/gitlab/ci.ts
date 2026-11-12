@@ -1,6 +1,10 @@
 import type { Project } from "./config.ts";
 export type Override = "reviewer" | "draft" | "ci";
 
+export function isTerminalMR(mr: any): boolean {
+  return mr?.state === "merged" || mr?.state === "closed";
+}
+
 export function eligible(mr: any, reviewerId: number, _ciMode: Project["ciMode"], overrides: Override[]): boolean {
   if (
     !mr ||

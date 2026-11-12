@@ -5,7 +5,7 @@ import { GitLab, TemporaryError } from "./api.ts";
 import { hash, canonical } from "./storage.ts";
 import { completedReport, loadArtifact, saveArtifact } from "./artifacts.ts";
 import { selectRequest, obsoleteCards, eventMatches, type Request } from "./review.ts";
-import { eligibleForReview } from "./ci.ts";
+import { eligibleForReview, isTerminalMR } from "./ci.ts";
 import { runCodex } from "./codex.ts";
 import { parseModelReport } from "./report.ts";
 import { manifest, severityManifests } from "./manifest.ts";
@@ -95,6 +95,10 @@ async function main() {
   const user = (await gl.get("user")) as { id: number };
   if (user?.id !== config.reviewerId) throw new Error("GitLab 登录身份与配置不符");
   const mr = (await gl.get(`projects/${project.id}/merge_requests/${first.mrIid}`)) as any;
+  if (isTerminalMR(mr)) {
+    summary = "没事可做：MR 已合并或关闭";
+    return;
+  }
   resolves.push(...obsoleteCards(context.open ?? [], project.id, first.mrIid, mr.sha));
   const records = readRequests(join(config.dataRoot, "gitlab"), project.id, first.mrIid);
   const local: Request[] = records.map((stored) => ({
@@ -199,6 +203,10 @@ async function main() {
   const latestMr = (await new GitLab(latestConfig.glabPath, latestConfig.instanceUrl).get(
     `projects/${project.id}/merge_requests/${selected.mrIid}`,
   )) as any;
+  if (isTerminalMR(latestMr)) {
+    summary = "没事可做：MR 已合并或关闭，保留审查报告";
+    return;
+  }
   if (latestMr.sha !== selected.headSha) {
     summary = "没事可做：MR 版本已变化";
     return;
