@@ -37,12 +37,12 @@ test("HTTP requires an exact explicit trusted origin", () => {
   assert.equal(parseConfig({ ...http, trustedHttpOrigin: http.instanceUrl }).instanceUrl, http.instanceUrl);
 });
 
-test("allow-skipped is per project and changes the policy fingerprint", () => {
+test("legacy allow-skipped is readable but does not change the policy fingerprint", () => {
   const base = input();
   const config = parseConfig({ ...base, projects: [{ ...base.projects[0], ciMode: "allow-skipped" }] });
   const required = parseConfig(base);
   assert.equal(config.projects[0].ciMode, "allow-skipped");
-  assert.notEqual(policyHash(config, config.projects[0], "skill"), policyHash(required, required.projects[0], "skill"));
+  assert.equal(policyHash(config, config.projects[0], "skill"), policyHash(required, required.projects[0], "skill"));
 });
 
 test("configuration-relative paths follow the configuration file, not the working directory", async () => {

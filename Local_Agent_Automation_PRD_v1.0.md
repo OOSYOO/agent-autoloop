@@ -106,9 +106,9 @@ flowchart TB
 | 编号 | 需求 | 可验证标准 |
 |---|---|---|
 | GL-01 | 自动发现 | 周期扫描授权范围内 Reviewer 包含本人的开放 MR，支持多 Group/Project 与分页，无新增任务不启动无意义的分析 |
-| GL-02 | CI 准入 | 当前 Head SHA 的 CI 成功，或明确确认项目未配置 CI 时允许自动分析；Pending/Failed/Cancelled/Skipped 或未知状态不等于未配置 CI |
+| GL-02 | CI 不阻塞审查 | 扫描、执行、卡片续办及评论发布均不以 CI 为门槛；无流水线、失败、运行中、跳过或旧 SHA 不阻止执行；旧 CI 配置兼容读取 |
 | GL-03 | Draft | Draft 不自动分析；转为 Ready 后即使 SHA 不变，也重新判断准入 |
-| GL-04 | 手动指定 | CLI 可指定 MR URL/标识；显式选择时可覆盖 Reviewer、Draft、CI 门槛，但不能绕过权限、版本校验或发布策略 |
+| GL-04 | 手动指定 | CLI 可指定 MR URL/标识；显式选择时可覆盖 Reviewer、Draft 门槛；旧 CI 覆盖项兼容接受但无作用，但不能绕过权限、版本校验或发布策略 |
 | GL-05 | 新版本与去重 | 任务关联 GitLab 实例、Project ID、MR IID、Head SHA 及有效策略；同一有效版本重复扫描不重复分析，Head 更新重新评估 |
 | GL-06 | 仓库与环境 | 以稳定 Project ID 映射设备和仓库位置，避免同名仓库误路由；Review 对应精确 Head 与 Diff Base |
 | GL-07 | 工作区与权限 | 分析默认只读，不改变开发分支和未提交改动；通过独立可信 main 目录和固定 SHA Git 对象准备上下文，不把业务发布权限交给模型自由使用 |
@@ -195,7 +195,7 @@ flowchart TB
 | Mac 启动与状态恢复 | SYS-01、SYS-07 | agent-autoloop 为实际底座，重启后可查询既有事项、结果与发布记录 |
 | Mac Codex | SYS-03–06、GL-06 | Mac 执行真实 Codex，命中指定模型/Skill；失败不偷偷替换；恢复与重试沿用上游 |
 | 规则与扩展边界 | SYS-02、SYS-11 | 相同输入和配置得到可解释路由；业务类型和设备/CLI 适配职责分离 |
-| MR 扫描与准入 | GL-01–03 | 完成分页；Reviewer 与当前 SHA CI 正确过滤；无 CI 可准入；Draft 转 Ready 同 SHA 可重新判断 |
+| MR 扫描与准入 | GL-01–03 | 完成分页；Reviewer 正确过滤；各种 CI 状态与无 CI 均不阻塞；Draft 转 Ready 同 SHA 可重新判断 |
 | 手动指定 | GL-04 | 显式覆盖项有效且可追溯，未覆盖的条件与权限、版本、发布规则仍生效 |
 | 精确版本与工作区 | GL-05–08 | 重复扫描不重复分析；新 SHA 可重审；报告来自指定 Git 版本且开发工作区不变；缺失上下文明确阻塞 |
 | 严重度和仓库策略 | PUB-01、PUB-02、PUB-10 | 默认经现成 CLI / 飞书卡片按报告确认；已开启仓库自动发布 P0/P1/P2；P3 不发布；不自动批准或合并 MR |

@@ -24,7 +24,6 @@ GitLab 扩展运行在接单程序所在的 Mac 或 Linux。它使用现有的�
     "projectPath": "team/project",
     "rulesBranch": "main",
     "publication": "severity",
-    "ciMode": "required",
     "cachePath": "cache/project.git"
   }]
 }
@@ -32,7 +31,7 @@ GitLab 扩展运行在接单程序所在的 Mac 或 Linux。它使用现有的�
 
 `projectPath` 必须与 GitLab 项目路径一致，裸缓存 origin 必须对应同一项目；`rulesBranch` 仅接受 `main`，省略时也使用 `main`。每个裸缓存旁派生一份专用 `<缓存名>.codereview-worktree`：每轮从远端更新到最新可信分支 commit，Codex 在这里原生读取仓库规则与 Skill。目录归属不匹配或有未提交改动时停止，不覆盖别人的目录。日常开发目录不会被 pull、reset 或切换分支。MR 的 Head、描述和差异仅作为独立文字资料，不被当成规则；不执行 MR 代码、测试或 hooks。共享审查目录按任务更新，不提供多版本隔离。
 
-`publication` 可选 `manual`、`auto` 或 `severity`，缺省为 `manual`；`ciMode` 缺省为 `required`，只接受当前 Head 的成功 pipeline；仅在本人确认项目没有 CI 时设置 `confirmed-none`，此时接受没有 pipeline，或当前 Head 的成功 pipeline。项目 CI 尚未上线且本人明确允许跳过时，可为该项目设置 `allow-skipped`：仅接受当前 Head 的 `success` 或 `skipped`，无 pipeline、旧版本以及失败、等待或取消均不放行。可选 `effort` 与上游 Agent 的 effort 一致；省略时使用 Codex 默认。运行参数中的模型和 effort 必须与配置一致。
+`publication` 可选 `manual`、`auto` 或 `severity`，缺省为 `manual`。GitLab Reviewers 包含本人或飞书委托即可触发；CI 失败、运行中、跳过、无流水线或旧 SHA 均不阻止审查和评论发布。仍要求 MR 已打开且非草稿，并校验身份、项目、版本及发布授权。可选 `effort` 与上游 Agent 的 effort 一致；省略时使用 Codex 默认。运行参数中的模型和 effort 必须与配置一致。
 
 5. 使用标准 `gitlab` 插件，不再引用开发目录里的脚本。以下片段合入现有 `rules.json`，保留其他任务。`mac-worker` 换成本机接单程序名称，项目 ID 与配置一致。工作目录放在固定的数据目录；模型和 effort 只在 GitLab 配置维护一份。
 
@@ -79,7 +78,7 @@ GitLab 审查任务指令来自唯一匹配的 `rules.prompt`，每轮核对 Hub
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
 
 
 ## 远程 Worker
@@ -106,24 +105,61 @@ GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发�
 
 ### 按自动检查判断审查时机
 
-人工审批也是 pipeline job 的项目可显式使用 `ciMode: "checks"`，例如：
+CI 不再决定审查时机。扫描、执行开始与完成、卡片续办和逐条评论发布均不读取 jobs、bridges 或子流水线；MR 的 head_pipeline 可缺省或为空。保留本节锚点供旧链接访问。
 
-```json
-{
-  "ciMode": "checks",
-  "ciJobs": ["check_squareline_sync", "build_code", "host_gate"],
-  "ciBridges": ["trigger_board_gate"]
-}
-```
+旧配置的 `ciMode`（required、confirmed-none、allow-skipped、checks）、`ciJobs`、`ciBridges` 保持格式校验和读取兼容，但不参与执行判断或新 policyHash。新配置无需填写这些字段；不新增忽略 CI 的模式。旧 `--override ci` 和历史覆盖记录仍接受，ci 项没有作用，不影响同记录中合法的 reviewer/draft 授权。
 
-`ciJobs` 是必填、非空且不重复的精确名称数组；`ciBridges` 可省略，缺省为空数组。元素不能空白或带首尾空格。这两个字段只用于 checks；旧模式保持原行为。名称由部署者按可信 main 维护，新增或改名的 CI 也要同步配置。
-
-每项指定 job 必须是当前 MR head_pipeline 下、同 head SHA 的唯一当前尝试，状态必须为 success；failed、canceled、skipped、manual、未完成及缺失都不通过。指定 bridge 除自身成功，还要求关联的同项目子流水线实际成功且 SHA 一致，不能把触发成功当作测试完成。即使设置 allow_failure，列入此配置的检查也必须成功。人工审批等未列入的 job 不阻止开始审查，不改变项目本身的审批或合并要求。
-
-扫描、审查开始和完成、人工回答续办及每条评论发布前使用同一判断，并重读 MR 核对 pipeline ID 与 head。配置名称保留审计；变更不触发同一 head 重审，发布按当前检查配置核实。先升级插件再启用此模式；它不修改项目 CI 文件、不启动 job、不合并 MR。checks 模式以外不能配置 ciJobs/ciBridges。
+升级所有扫描、审查和发布 Worker 后再恢复扫描，不承诺新旧插件混用时行为一致。已完成报告、待确认卡片和发布记录保留原标识；已投递的同一 head 不因升级再审，此前仅因 CI 被阻止且从未投递的 MR 在下次扫描首次触发。不修改 GitLab 项目自身 CI、审批或合并要求。
 
 
-GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
+GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
 
 
 模型完成状态以 `complete` 及原生进程完成记录判断。`complete=true` 时，executionIssue 中合法长度的附带摘要只保留在原始审计，规范化结果将其清空；不因此丢弃已校验的 findings。`complete=false` 仍作为执行失败处理，findings 的结构、路径与大小校验不变。
+
+## 飞书消息委托审查
+
+在 GitLab Reviewer 之外，可以启用标准 `feishu` Agent 插件读取本人消息。启用即授权：私聊收到或群里明确 @ 本人的审查请求，只有一个已配置 MR 且没有否定、转述或其他接收人时，自动接入现有 GitLab 审查；其余候选请求发卡片确认。识别使用固定表达规则，不调用模型判断聊天指令，未识别的表达不会自动执行。聊天不能改变目录、命令、模型或权限。
+
+在 GitLab 配置旁保存私有 `feishu-review.json`：
+
+```json
+{
+  "user": "ou_你的飞书编号",
+  "gitlabConfig": "config.json",
+  "lark": "lark-cli"
+}
+```
+
+`gitlabConfig` 相对这份文件；`lark` 为 PATH 中程序名或绝对路径。在同一 Worker 上完成飞书本人身份授权，确认 `auth status --json` 中 openId 与 `user` 一致，并具备搜索本人消息、读取群聊及本人私聊消息的权限。机器人卡片通道沿用现有配置，不增加事件监听。飞书扫描、请求处理、GitLab 扫描和审查必须使用同一个 Worker 和同一份 GitLab 配置／私有数据目录；远程部署须在该 Worker 上登录飞书，不能只在 Mac 上保存候选记录。
+
+将以下 **agents 和 rules 片段合入** 现有规则，保留 `gitlab` 来源和 `mr.review.<项目ID>` 审查规则。`worker` 和 `cwd` 替换为已有值。已有 GitLab 扫描规则的 `group` 也改为 `gitlab-intake`、`parallel` 为 1，让两种入口按中台并发限制串行写入审查请求；不要另外启动手工扫描进程与它们同时写入。
+
+```json
+{
+  "agents": {
+    "feishu-review-scan": {
+      "name": "飞书审查请求扫描", "worker": "mac-worker", "use": "feishu", "timeout": 300,
+      "command": ["scan", "--config", "gitlab/feishu-review.json"]
+    },
+    "feishu-review-request": {
+      "name": "处理飞书审查请求", "worker": "mac-worker", "use": "feishu", "timeout": 300,
+      "command": ["review", "--config", "gitlab/feishu-review.json"]
+    }
+  },
+  "rules": [
+    { "name": "feishu-review-scan", "when": { "cron": "*/3 * * * *" }, "to": "feishu-review-scan", "prompt": "按可信配置扫描飞书本人消息。", "cwd": "/PRIVATE/gitlab/work", "group": "gitlab-intake", "parallel": 1 },
+    { "name": "feishu-review-request", "when": { "source": "gitlab", "types": ["feishu.review.request"] }, "to": "feishu-review-request", "prompt": "按本地证据与本人回答接入审查。", "cwd": "/PRIVATE/gitlab/work", "group": "gitlab-intake", "parallel": 1 }
+  ]
+}
+```
+
+扫描同时读取群聊 @ 本人和私聊消息，过滤本人发出的消息、机器人、撤回消息及 @ 全体。首次读取最近 15 分钟，之后从已确认时间往前重叠 10 分钟，停机后从原位置补读；搜索服务的延迟超过重叠窗口时可能漏掉消息。每页读完再继续，所有候选事件获得中台回执后才推进时间。以本人和消息 ID 去重，编辑旧消息不视为新委托，请重新发送。只保存候选消息证据，不保存完整私聊历史。
+
+支持“先发 MR 链接，随后请帮忙看一下”：优先取消息自身的链接，否则读取前 5 分钟同会话、同发送人的消息，以及可用的话题历史中该发送人此前的链接；有多个目标时不猜。没有目标或目标超过三个时，可在命令行 `agent-autoloop answer <卡片ID> --text <MR链接>` 回复单个已配置 MR，也可忽略。卡片发出后本轮即结束，不等待用户。登录和权限阻塞发恢复卡片，不持续重试登录。
+
+确认及明确请求只覆盖 `reviewer`，不覆盖 draft；CI 不再作为审查或发布门槛。未就绪请求交给中台失败重试。已关闭 MR 不会执行。审查与评论发布沿用项目现有策略，因此启用自动发布的项目仍可能发布普通 Discussion，但不会回复飞书请求人。消息证据保存在 `<dataRoot>/feishu-review/<instanceKey>/<user>/requests/`，GitLab 请求原因记录消息 ID、发送人及证据编号。同一 MR head 已投递时不重复投递，也不会因私聊催促重跑模型；已有报告复用规则保持不变。单条委托针对处理时的当前版本，不永久订阅未指派给本人的 MR。
+
+先运行 `agent-autoloop check` 核对唯一事件路由再启用 cron。新增类型为 `gitlab` 来源下的 `feishu.review.request`，只含本地证据编号；处理程序只读取匹配编号的本地证据，不接受事件文字提供的覆盖权限。中台和 Worker 的规则副本必须一致。此功能为显式启用；旧配置和 HTTP 协议不变。
+
+多 Worker 部署时，每份飞书配置设置唯一 `route`（例如 `app`、`ek001`），对应规则类型改为 `feishu.review.request.app`、`feishu.review.request.ek001`。消息编号也按 route 隔离，避免同实例不同仓库抢占事件。只让一台 Worker 保持默认 `askUnmatched: true`，其他设置为 false：无明确目标的请求只问一次；明确指向其他仓库的链接忽略，不派错机器。各机仍使用自己的 GitLab 配置、数据与凭据。

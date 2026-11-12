@@ -197,7 +197,7 @@ test("reviewer removal then reassignment at the same SHA does not dispatch again
   assert.equal(records.at(-1).observation, 1);
 });
 
-test("automatic checks use the shared live gate and never fall back to parent success", async () => {
+test("CI cannot block initial dispatch or redispatch the delivered head", async () => {
   const { eligibleForReview } = await import("../plugins/gitlab/ci.ts");
   const mr = {
     iid: 7,
@@ -211,7 +211,7 @@ test("automatic checks use the shared live gate and never fall back to parent su
   const config = { instanceKey: "work", instanceUrl: "https://gitlab.example.com", reviewerId: 8 };
   const posted: object[] = [],
     records: any[] = [];
-  let status = "success";
+  let status = "failed";
   const gl = {
     get: async () => mr,
     list: async () => [{ id: 1, name: "host", status, commit: { id: sha }, pipeline: { id: 10 } }],

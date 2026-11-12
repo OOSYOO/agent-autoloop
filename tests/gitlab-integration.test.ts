@@ -1,4 +1,4 @@
-// Failure modes: a remote report cannot resume from an answer, or a stale server rule copy accepts a Hub job.
+// Failure modes: CI blocks execution or answer publication; a remote report cannot resume, or a stale rule copy accepts a Hub job.
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import {
@@ -74,7 +74,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       draft: false,
       sha: head,
       reviewers: [{ id: 8 }],
-      head_pipeline: { id: 10, sha: head, status: "success" },
+      head_pipeline: { id: 10, sha: head, status: "failed" },
       diff_refs: null,
     };
     const version = {
@@ -90,7 +90,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(versionFile, JSON.stringify({ ...version, diffs: [{ ...version.diffs[0], too_large: true }] }));
     writeFileSync(
       glab,
-      `#!/usr/bin/env node\nconst fs=require('fs'),p=process.argv[3],a=process.argv;if(a.includes('POST')) {if(process.env.TEST_POST_FAIL){process.stdout.write('HTTP/1.1 400 Bad Request\\r\\n\\r\\n{}');process.exit(1)}let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const b=JSON.parse(s);fs.appendFileSync(${JSON.stringify(join(root, "posts.log"))},JSON.stringify(b)+'\\n');if(process.env.TEST_PUBLICATION){const f=${JSON.stringify(join(root, "config.json"))},c=JSON.parse(fs.readFileSync(f));c.projects[0].publication=process.env.TEST_PUBLICATION;fs.writeFileSync(f,JSON.stringify(c));}if(process.env.TEST_CHANGE_RULES)require('child_process').execFileSync('git',['--git-dir',${JSON.stringify(bare)},'update-ref','refs/heads/main',process.env.TEST_CHANGE_RULES]);process.stdout.write('HTTP/1.1 201 Created\\r\\nContent-Type: application/json\\r\\n\\r\\n'+JSON.stringify({id:'d',notes:[{id:3,position:b.position}]}));});}else {if(p.includes('/versions')){fs.writeFileSync(${JSON.stringify(join(root, "unexpected-versions"))},'called');process.exit(9)}const current=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));const checks=fs.existsSync(${JSON.stringify(join(root, "checks-state.json"))})?JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "checks-state.json"))})):{};let v=p.includes('/pipelines/10/jobs?')?[{id:101,name:'build',status:checks.job||'success',commit:{id:current.sha},pipeline:{id:10}}]:p.includes('/pipelines/10/bridges?')?[{id:102,name:'board',status:'success',commit:{id:current.sha},pipeline:{id:10},downstream_pipeline:{id:11,project_id:42,sha:current.sha}}]:p.endsWith('/pipelines/11')?{id:11,project_id:42,sha:current.sha,status:checks.child||'success'}:p==='user'?{id:8}:p==='projects/42'?{id:42,path_with_namespace:'team/app',ssh_url_to_repo:${JSON.stringify(bare)}}:p.includes('/discussions?')?(process.env.TEST_OLD?[{notes:[{author:{id:8},body:'<!-- agent-autoloop:action='+('d'.repeat(64))+' -->',position:{head_sha:'e'.repeat(40)}}]}]:[]):p.includes('/versions/1')?JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)})):p.includes('/versions?')?[JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)}))]:JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));console.log(JSON.stringify(v));}`,
+      `#!/usr/bin/env node\nconst fs=require('fs'),p=process.argv[3],a=process.argv;if(a.includes('POST')) {if(process.env.TEST_POST_FAIL){process.stdout.write('HTTP/1.1 400 Bad Request\\r\\n\\r\\n{}');process.exit(1)}let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const b=JSON.parse(s);fs.appendFileSync(${JSON.stringify(join(root, "posts.log"))},JSON.stringify(b)+'\\n');if(process.env.TEST_PUBLICATION){const f=${JSON.stringify(join(root, "config.json"))},c=JSON.parse(fs.readFileSync(f));c.projects[0].publication=process.env.TEST_PUBLICATION;fs.writeFileSync(f,JSON.stringify(c));}if(process.env.TEST_CHANGE_RULES)require('child_process').execFileSync('git',['--git-dir',${JSON.stringify(bare)},'update-ref','refs/heads/main',process.env.TEST_CHANGE_RULES]);process.stdout.write('HTTP/1.1 201 Created\\r\\nContent-Type: application/json\\r\\n\\r\\n'+JSON.stringify({id:'d',notes:[{id:3,position:b.position}]}));});}else {if(p.includes('/pipelines/'))process.exit(8);if(p.includes('/versions')){fs.writeFileSync(${JSON.stringify(join(root, "unexpected-versions"))},'called');process.exit(9)}const current=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));const checks=fs.existsSync(${JSON.stringify(join(root, "checks-state.json"))})?JSON.parse(fs.readFileSync(${JSON.stringify(join(root, "checks-state.json"))})):{};let v=p.includes('/pipelines/10/jobs?')?[{id:101,name:'build',status:checks.job||'success',commit:{id:current.sha},pipeline:{id:10}}]:p.includes('/pipelines/10/bridges?')?[{id:102,name:'board',status:'success',commit:{id:current.sha},pipeline:{id:10},downstream_pipeline:{id:11,project_id:42,sha:current.sha}}]:p.endsWith('/pipelines/11')?{id:11,project_id:42,sha:current.sha,status:checks.child||'success'}:p==='user'?{id:8}:p==='projects/42'?{id:42,path_with_namespace:'team/app',ssh_url_to_repo:${JSON.stringify(bare)}}:p.includes('/discussions?')?(process.env.TEST_OLD?[{notes:[{author:{id:8},body:'<!-- agent-autoloop:action='+('d'.repeat(64))+' -->',position:{head_sha:'e'.repeat(40)}}]}]:[]):p.includes('/versions/1')?JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)})):p.includes('/versions?')?[JSON.parse(fs.readFileSync(${JSON.stringify(versionFile)}))]:JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));console.log(JSON.stringify(v));}`,
       { mode: 0o700 },
     );
     const report = {
@@ -113,7 +113,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(reportFile, JSON.stringify(report));
     writeFileSync(
       codex,
-      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;if(a.includes('app-server')){const q=require('readline').createInterface({input:process.stdin});q.on('line',l=>{let x=JSON.parse(l);if(x.id===1)console.log(JSON.stringify({id:1,result:{}}));if(x.id===2)console.log(JSON.stringify({id:2,result:{config:{mcp_servers:{},features:{hooks:false,apps:false,memories:false},web_search:'disabled',permissions:{review:{network:{enabled:false},filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}}}}}}}));if(x.id===3)console.log(JSON.stringify({id:3,result:{data:[{cwd:process.cwd(),errors:[],skills:[{name:'alpha',path:${JSON.stringify(join(skillDir, "SKILL.md"))},scope:'user',enabled:true}]}]}}))});}else {const mr=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));let prompt='';process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(prompt.includes(mr.description)||prompt.includes(mr.title)||!prompt.includes('使用alpha详细审查')||!prompt.includes('https://gitlab.example.com/team/app/-/merge_requests/7')||!prompt.includes(mr.sha)||prompt.includes('git --git-dir'))process.exit(3);if(fs.existsSync(${JSON.stringify(join(root, "change-mr"))})){let change=fs.readFileSync(${JSON.stringify(join(root, "change-mr"))},'utf8');fs.unlinkSync(${JSON.stringify(join(root, "change-mr"))});if(change==='draft')mr.draft=true;else mr.sha='f'.repeat(40);fs.writeFileSync(${JSON.stringify(mrFile)},JSON.stringify(mr));}if(fs.existsSync(${JSON.stringify(join(root, "change-skill"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-skill"))});fs.writeFileSync(${JSON.stringify(join(skillDir, "SKILL.md"))},'changed skill');}if(fs.existsSync(${JSON.stringify(join(root, "change-prompt"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-prompt"))});let f=${JSON.stringify(join(root, "rules.json"))},r=JSON.parse(fs.readFileSync(f));r.rules[0].prompt='更改的可信指令';fs.writeFileSync(f,JSON.stringify(r));}fs.writeFileSync(a[a.indexOf('-o')+1],fs.readFileSync(${JSON.stringify(reportFile)}));console.log(JSON.stringify({type:'turn.completed'}));});}`,
+      `#!/usr/bin/env node\nconst fs=require('fs'),a=process.argv;if(a.includes('app-server')){const q=require('readline').createInterface({input:process.stdin});q.on('line',l=>{let x=JSON.parse(l);if(x.id===1)console.log(JSON.stringify({id:1,result:{}}));if(x.id===2)console.log(JSON.stringify({id:2,result:{config:{mcp_servers:{},features:{hooks:false,apps:false,memories:false},web_search:'disabled',permissions:{review:{network:{enabled:false},filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}}}}}}}));if(x.id===3)console.log(JSON.stringify({id:3,result:{data:[{cwd:process.cwd(),errors:[],skills:[{name:'alpha',path:${JSON.stringify(join(skillDir, "SKILL.md"))},scope:'user',enabled:true}]}]}}))});}else {const mr=JSON.parse(fs.readFileSync(${JSON.stringify(mrFile)}));let prompt='';process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(prompt.includes(mr.description)||prompt.includes(mr.title)||!prompt.includes('使用alpha详细审查')||!prompt.includes('https://gitlab.example.com/team/app/-/merge_requests/7')||!prompt.includes(mr.sha)||prompt.includes('git --git-dir'))process.exit(3);if(fs.existsSync(${JSON.stringify(join(root, "change-mr"))})){let change=fs.readFileSync(${JSON.stringify(join(root, "change-mr"))},'utf8');fs.unlinkSync(${JSON.stringify(join(root, "change-mr"))});if(change==='draft')mr.draft=true;else if(change==='ci')mr.head_pipeline={id:99,sha:mr.sha,status:'failed'};else mr.sha='f'.repeat(40);fs.writeFileSync(${JSON.stringify(mrFile)},JSON.stringify(mr));}if(fs.existsSync(${JSON.stringify(join(root, "change-skill"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-skill"))});fs.writeFileSync(${JSON.stringify(join(skillDir, "SKILL.md"))},'changed skill');}if(fs.existsSync(${JSON.stringify(join(root, "change-prompt"))})){fs.unlinkSync(${JSON.stringify(join(root, "change-prompt"))});let f=${JSON.stringify(join(root, "rules.json"))},r=JSON.parse(fs.readFileSync(f));r.rules[0].prompt='更改的可信指令';fs.writeFileSync(f,JSON.stringify(r));}fs.writeFileSync(a[a.indexOf('-o')+1],fs.readFileSync(${JSON.stringify(reportFile)}));console.log(JSON.stringify({type:'turn.completed'}));});}`,
       { mode: 0o700 },
     );
     execFileSync(process.execPath, ["--check", codex]);
@@ -971,7 +971,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
       5,
       "main changes do not prevent the second approved comment",
     );
-    // A human approval job may cancel the parent while required jobs and the child have passed.
+    // Legacy checks cannot block execution, completion or approval, even if CI changes mid-review.
     const checksRaw = {
       ...raw,
       projects: [
@@ -1026,6 +1026,11 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         },
       });
     rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
+    writeFileSync(
+      reportFile,
+      JSON.stringify({ ...report, findings: [{ ...report.findings[0], title: "CI-independent publication" }] }),
+    );
+    writeFileSync(join(root, "change-mr"), "ci");
     const checked = executeChecks();
     assert.equal(checked.status, 0, checked.stderr);
     const checkedAsk = resultFrom(readMessage(checked.stdout), {}).result.ask?.[0];
@@ -1052,8 +1057,11 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     writeFileSync(join(root, "checks-state.json"), JSON.stringify({ child: "failed" }));
     const noLongerPassed = executeChecks();
     assert.equal(noLongerPassed.status, 0, noLongerPassed.stderr);
-    assert.match(noLongerPassed.stdout, /MR 状态或发布权限已变化，未发布/);
-    assert.equal(readFileSync(join(root, "posts.log"), "utf8"), postsBeforeChecks);
+    assert.doesNotMatch(noLongerPassed.stdout, /未发布/);
+    assert.equal(
+      readFileSync(join(root, "posts.log"), "utf8").trim().split("\n").length,
+      postsBeforeChecks.trim().split("\n").length + 1,
+    );
     rmSync(join(root, "checks-state.json"));
     const severityRaw = { ...raw, projects: [{ ...raw.projects[0], publication: "severity" }] };
     writeFileSync(file, JSON.stringify(severityRaw));
@@ -1088,7 +1096,7 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
         JSON.stringify({
           ...mr,
           sha: scenarioHead,
-          head_pipeline: { sha: scenarioHead, status: "success" },
+          head_pipeline: { sha: scenarioHead, status: "failed" },
           diff_refs: { ...refs, head_sha: scenarioHead },
         }),
       );

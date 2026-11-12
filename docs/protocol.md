@@ -412,7 +412,7 @@ GitLab 插件通过 Codex 原生配置读取和 Skill 目录接口取得审查�
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
 
 
 飞书卡片将校验通过的 HTTP/HTTPS 网址呈现为可点击超链接；同一正文可含多个链接。其余正文仍按纯文本显示，链接标签和目标分别转义，不将 finding 中的标记或提及当成指令或交互。
@@ -420,9 +420,11 @@ GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发�
 
 GitLab 扫描与审查可一起交给远程 Linux Worker，中台与通道留在 Mac；两端使用独立数据目录与同一规则副本，服务器 capacity=1。部署、断线恢复和切换约束见[远程 Worker](gitlab-review.md#远程-worker)。
 
-GitLab 可显式使用 checks 模式，按指定自动检查和同项目子流水线成功决定审查时机，人工审批不阻止开始审查；旧模式保持原行为，详见[自动检查门槛](gitlab-review.md#按自动检查判断审查时机)。
+GitLab 审查从扫描到评论发布均不等待 CI；旧 CI 配置仅兼容读取，详见[CI 配置兼容](gitlab-review.md#按自动检查判断审查时机)。
 
-GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、CI、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
+GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
 
 
 模型完成状态以 `complete` 及原生进程完成记录判断。`complete=true` 时，executionIssue 中合法长度的附带摘要只保留在原始审计，规范化结果将其清空；不因此丢弃已校验的 findings。`complete=false` 仍作为执行失败处理，findings 的结构、路径与大小校验不变。
+
+飞书可作为 GitLab 审查的第二入口：用本人身份轮询群聊 @ 和私聊，明确请求自动审查、模糊请求用卡片确认。只覆盖 Reviewer，保留草稿和发布策略，CI 不再作为门槛；同 head 不重复派发，不回复同事。使用标准 `feishu` Agent 插件，显式配置后启用；权限、串行接入与部署见[飞书消息委托审查](gitlab-review.md#飞书消息委托审查)。

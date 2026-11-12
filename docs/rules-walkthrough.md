@@ -8,7 +8,7 @@
 |---|---|---|
 | `config.json` | 本机启动哪些角色、Hub 地址、Worker 名称与容量、密钥、飞书收件人等 | `host/up.ts`、各通道 |
 | `rules.json` | 来源、Agent、通道的登记，以及何时派活、派给谁、并发与通知策略 | `host/runtime.ts` 加载，内核按规则决策 |
-| `gitlab/config.json` | GitLab 实例、项目白名单、本人 Reviewer ID、模型、缓存、CI 和发布策略等 | GitLab 插件 |
+| `gitlab/config.json` | GitLab 实例、项目白名单、本人 Reviewer ID、模型、缓存和发布策略（旧 CI 字段仅兼容读取）等 | GitLab 插件 |
 
 实例的 `bin/agent-autoloop` 包装器固定设置 `AGENT_AUTOLOOP_HOME`。`host/home.ts` 据此定位 `config.json` 和 `rules.json`；也支持显式 `AGENT_AUTOLOOP_RULES` 覆盖规则文件位置。程序位于实例 `app/`，数据位于 app 外；源码仓库不是在线实例的程序目录。
 
@@ -52,7 +52,7 @@ flowchart TD
 
 ## 扫描发现 MR 后：数据流
 
-`poll.ts` 读取项目白名单，遍历各项目打开的 MR，再检查非草稿、Reviewer、当前 Head 的 CI 策略等。项目 ID 决定查哪个远端项目，缓存目录不负责选项目。
+`poll.ts` 读取项目白名单，遍历各项目打开的 MR，再检查非草稿、Reviewer 和有效 head；不检查 CI。项目 ID 决定查哪个远端项目，缓存目录不负责选项目。
 
 对合格 MR，插件生成并持久化请求，再向中台提交事件。以 示例项目 !80 为例，其关键内容形如：
 
@@ -102,7 +102,7 @@ flowchart TD
 
 点击卡片后，通道携带选项、回答人身份和消息 ID 提交回答。`kernel/decide.ts` 检查 `channels.feishu.answerers` 和已发送的原消息，重复回答不重复生效。合法回答被记录，并直接唤醒卡片所属的原规则；不需要另配 `card.answered` 路由。
 
-下一轮 `run.ts` 读取回答，验证它绑定的待发布清单和当前事实；每条发布前核对当前项目身份、MR head、CI、Reviewer 和批准范围，才可能创建 GitLab 评论。MR 状态核对与 GitLab 写入不是同一个远端事务，因此发送后还会核实，发现变化要交本人处理已发到旧版本的评论。等待人时，上一轮早已结束，不占模型进程。通道并不直接把点击转为 GitLab 写入。
+下一轮 `run.ts` 读取回答，验证它绑定的待发布清单和当前事实；每条发布前核对当前项目身份、MR head、Reviewer 和批准范围，才可能创建 GitLab 评论。MR 状态核对与 GitLab 写入不是同一个远端事务，因此发送后还会核实，发现变化要交本人处理已发到旧版本的评论。等待人时，上一轮早已结束，不占模型进程。通道并不直接把点击转为 GitLab 写入。
 
 审查完成后，findings 通过通知或确认卡片发送；零 findings 也会产生结果通知。`tell: needed` 不额外发送通用完成摘要；无需为了收到审查结果改成 `always`，否则可能出现重复摘要。扫描规则也无需每次通知。
 
@@ -127,4 +127,4 @@ agent-autoloop why 12        # 第 12 轮经历了什么
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。

@@ -1,5 +1,159 @@
 # agent-autoloop GitLab Review 方案
 
+**本次交付范围：**[取消 GitLab Review 的 CI 门槛](#取消-gitlab-review-的-ci-门槛)定义扫描、审查、人工续办和评论发布的新行为。该节定义当前 CI 行为；实施与验收状态见 [交付记录](../delivery/local_agent_automation-M1.md)，不代表目标环境已经升级。
+
+## 取消 GitLab Review 的 CI 门槛
+
+状态：2026-11-12 用户已确认，本节范围可实施；实施与验收进展见交付记录。比较基线为 `eec99debfd3af86df408b21b1b57600afde59416` 加当前工作区已有的飞书委托入口与 GitLab 改动；飞书入口包含未提交文件，实施时必须保留这些改动。
+
+### 需求与验收
+
+GitLab Reviewers 包含本人，或者飞书收到明确审查委托，即可进入同一审查流程。取消从扫描到评论发布的全部 CI 门槛；不修改 GitLab 项目自身的 CI、审批与合并要求，不涉及 GitHub 交付插件。草稿限制、身份与项目授权、MR 版本校验、评论发布授权保持现有行为。飞书模糊请求继续由本人卡片确认，不扩大聊天识别范围。
+
+| 需求 | 条件与触发行为 | 可验证的通过标准 |
+|---|---|---|
+| CI-01 GitLab 扫描触发 | opened、非草稿、Reviewer 包含本人 | 所有流水线状态、无流水线、缺少 head_pipeline 字段、流水线 SHA 落后均不阻止首次派单 |
+| CI-02 飞书委托触发 | 已启用入口收到明确请求，或本人确认模糊请求 | 继续只覆盖 Reviewer；各种 CI 状态均能进入审查，草稿与已关闭 MR 不放行 |
+| CI-03 审查与发布连续完成 | 执行开始、完成、卡片续办及每条评论发布时 CI 变化 | 结果可按现有 publication 策略处理，CI 不导致失败重试或阻止评论发布 |
+| CI-04 去重与版本保护 | 两入口请求相同 head，或审查期间 head 变化 | 同 head 不重复调用模型、复用已完成报告；新 head 下不能发布旧报告；CI 变化不触发重审 |
+| CI-05 升级兼容 | 使用旧 CI 配置、覆盖参数、请求和报告 | 旧配置仍可读取，旧审查与卡片可续办；CI 信息不再参与准入或发布判断 |
+
+### 选型依据
+
+采用现有 GitLab MR API 和插件流程，删除 CI 决策依赖。GitLab 独立提供 `state`、`draft`、`reviewers`、`sha` 与 `head_pipeline`，评论通过普通 Discussion API 发布；取消流水线条件无需替换通信协议或引入依赖。来源：[MR API](https://docs.gitlab.com/api/merge_requests/)、[Discussion API](https://docs.gitlab.com/api/discussions/)，查证日期 2026-11-12。
+
+仅在扫描入口覆盖 CI 不足以满足需求：`run.ts` 与 `resume.ts` 仍调用同一门槛。采用完整修改所有调用点的方案。保留可选 CI 门槛会继续维护用户已明确取消的策略，因此不增加新模式。最小修改与职责优化在这里一致：准入仍归 GitLab 插件，不抽取新的规则引擎。所需 MR 读取、审查和发布能力均已存在，无需前置技术实验；真实部署升级后的行为仍需验收。
+
+### 架构与影响范围
+
+箭头表示运行时调用或数据读写；Hub 与 Worker 可分机，图中不限定部署。业务文件属于插件，事项、调度与卡片状态仍归内核事实日志。
+
+```mermaid
+flowchart TB
+    GL["GitLab / MR 与 Discussion API"]
+    FS["飞书 / 本人消息与卡片回答"]
+    subgraph HUB["中台进程"]
+        K["host + kernel / 事件、派单、卡片"]
+        DB[("SQLite / 事实日志与投影")]
+        K -->|"commit / evolve"| DB
+    end
+    subgraph WORKER["Worker 与插件子进程"]
+        subgraph ENTRY["入口"]
+            F["plugins/feishu/review-runtime.ts / 消息委托"]
+            P["plugins/gitlab/poll.ts + scan.ts / 发现与派单"]
+        end
+        subgraph EXEC["审查与发布"]
+            W["worker / 任务执行与回执"]
+            R["plugins/gitlab/run.ts / 审查"]
+            S["plugins/gitlab/resume.ts + publish.ts / 授权与发布"]
+            C["plugins/gitlab/ci.ts / MR 准入，无 CI 条件"]
+        end
+        A[("dataRoot/gitlab / 请求、报告、发布记录")]
+    end
+    FS -->|"轮询与本人确认"| F
+    F -->|"scanGitlab：MR URL，override reviewer"| P
+    P -->|"GET projects/:id/merge_requests/:iid"| GL
+    P -->|"MR 准入"| C
+    P -->|"POST /v1/events"| K
+    W -->|"GET /v1/work"| K
+    W -->|"review / context"| R
+    R -->|"MR 准入"| C
+    R -->|"发布清单"| S
+    S -->|"current：MR 准入"| C
+    S -->|"POST 普通 Discussion"| GL
+    R -->|"保存报告"| A
+    P -->|"保存请求"| A
+    S -->|"保存发送意图与回执"| A
+```
+
+图中 `eligibleForReview` 是本地准入调用，MR 读取通过 `GitLab.get`；不在 API 服务端新增准入逻辑。执行仍由 `codex.ts` 启动原生 Codex，使用可信 main 与 MR 链接。保留现有文件名以控制改动，不为清理命名另外重构。
+
+| 文件或约定 | 实施修改 |
+|---|---|
+| `plugins/gitlab/ci.ts` | 删除 pipeline 字段必填与状态、SHA 判断，删除 jobs、bridges、子流水线查询；保留 opened、draft、Reviewer、有效 head 校验 |
+| `poll.ts`、`scan.ts`、`run.ts`、`resume.ts` | 统一调用不依赖 CI 的准入；完成、续办与逐条发布的复核均覆盖 |
+| `config.ts`、`manual.ts` | 旧字段与旧覆盖值兼容读取；CI 配置退出执行策略和新 policyHash 的计算 |
+| `plugins/feishu/review-runtime.ts` | 保持现有 Reviewer 委托语义，不增加 ci 覆盖，也不放宽草稿限制 |
+| 测试与资料 | 同步 CI、扫描、执行、发布、飞书测试及使用说明；不改内核、队列或重试机制 |
+
+### 交互过程
+
+GitLab 指派本人或飞书委托审查：两种入口汇入同一 MR 事项，图覆盖执行、版本失效及评论发布。
+
+```mermaid
+sequenceDiagram
+    participant F as Worker/feishu review-runtime.ts
+    participant P as Worker/gitlab poll.ts
+    participant G as GitLab/MR API
+    participant H as 中台/host + kernel
+    participant R as Worker/gitlab run.ts
+    participant C as Worker/gitlab codex.ts
+    participant S as Worker/gitlab resume.ts + publish.ts
+    opt 飞书明确请求或本人卡片确认
+        F->>P: scanGitlab(--mr URL, --override reviewer, --reason 证据, reuseHead=true)
+    end
+    P->>G: GET projects/:id/merge_requests/:iid
+    G-->>P: opened、draft、reviewers、sha（忽略 CI）
+    P->>H: POST /v1/events，mr.review.<projectId>，稳定 requestId 与 headSha
+    H-->>P: event、duplicate、routed；非唯一路由记录失败
+    H-->>R: 经 Worker 派发 Job/context，按 MR subject 合并
+    R->>G: GET MR，核对身份、准入与 headSha
+    alt 当前版本无完成报告
+        R->>C: 原生 Codex，可信 prompt + MR URL + headSha
+        C-->>R: complete、findings；退出并释放进程
+    else 当前版本已有完成报告
+        Note over R: 复用报告，不再调用模型
+    end
+    R->>G: GET MR，复核 head 与准入，不检查 CI
+    alt head 已变化
+        Note over R: 保留报告，不发布旧版本结果
+    else 版本仍一致
+        R->>S: 当前报告及 publication 发布清单
+        Note over S,H: manual/P2 需本人确认时写 ask 并结束本轮；回答后新一轮续办
+        S->>G: GET MR 与 user，逐条复核版本、身份及授权
+        S->>G: POST projects/:id/merge_requests/:iid/discussions，body
+        G-->>S: Discussion 与 note 标识；写入发送记录
+    end
+```
+
+### 交互与兼容契约
+
+现有 HTTP 事件、报告、卡片及 Discussion 字段不变，权威定义见本文第 5 节及 [通用协议](../protocol.md)。本次只修改门槛语义，不新增 HTTP 入口。`eligible`/`eligibleForReview` 成功返回 `true`、不满足条件返回 `false`；GitLab 身份或 MR 读取失败仍报错，不把网络失败当作放行。内部调用参数由实现同步收敛，所有调用方在同一插件版本升级。
+
+| 接口或数据 | 变更前 | 变更后与适配 |
+|---|---|---|
+| `projects[].ciMode` | 默认 required，另有 confirmed-none、allow-skipped、checks，决定 CI 门槛 | 旧合法值与配套 ciJobs/ciBridges 保持读取兼容，但不参与准入、发布与新策略摘要；新配置示例省略这些字段，不新增 ignore 模式 |
+| `projects[].ciJobs/ciBridges` | checks 模式必需或可选检查名称 | 仅兼容读取；保留旧输入格式校验，不发 jobs/bridges/pipeline API 请求 |
+| `--override ci` 与历史请求 `overrides` | 本人显式覆盖 CI 门槛，覆盖须有原因 | 继续接受旧值及原有原因约束，ci 为无操作项；不能因数组含 ci 而丢弃同记录中的 reviewer/draft 授权 |
+| MR `head_pipeline` | 必须存在，按模式检查状态与 SHA | 不必存在；其内容不影响任何审查或发布判断 |
+| `policyHash` | 包含 CI 配置 | 新摘要不包含 CI 配置；旧记录中的摘要保持原值，禁止改写历史请求、报告与批准清单 |
+| 飞书请求 | 覆盖 Reviewer，保留 CI、draft 门槛 | 仍只覆盖 Reviewer；统一准入本身无 CI 门槛，draft 约束不变 |
+
+部署先升级运行扫描、审查及发布的所有 Worker 插件，再恢复扫描；旧版本仍会执行旧门槛，不承诺混用时行为一致。无需改私人配置、迁移日志或清空业务数据；旧字段可在之后整理配置时移除。回退旧版本会恢复旧配置决定的 CI 门槛，新报告与请求不需删除。
+
+同 head 已投递记录仍优先去重，升级后的策略摘要变化不能造成自动重审。此前只因 CI 被阻止且从未投递的 MR，在下一次扫描满足其他条件时首次投递；已派单任务使用现有中台重试。两入口共用 MR subject 与请求记录；并发到达仍由原有事项合并和并发规则调度，不新增插件锁。
+
+审查期间 CI 失败也保存并处理报告。MR 关闭、变成草稿、移除必要 Reviewer 或项目身份变化，仍按当前准入及已绑定的合法覆盖处理，取消 CI 不扩大旧请求的权限。发布头版本不符时停止剩余评论；请求超时或远端写入结果不确定时保留意图，使用 `publishOne` 的远端查找核对，不因 CI 变化重发评论。已发送后才发现 head 变化时保留真实发送记录，不声称评论从未发出。
+
+### 验收矩阵与交付检查
+
+先编写复现旧 CI 阻塞的失败测试，再修改实现；现有非 CI 行为测试保持约束。以下是实施验收要求，实际执行状态与版本见交付记录。
+
+| 场景 | 级别与入口 | 通过证据 |
+|---|---|---|
+| GitLab 扫描触发（CI-01） | L0 `tests/gitlab-ci.test.ts`；L1 `gitlab-poll.test.ts`、`gitlab-scan.test.ts` | success、failed、running、pending、manual、canceled、skipped、null、缺字段、旧 SHA 均放行；不请求流水线端点 |
+| 飞书委托触发（CI-02） | L1 `tests/feishu-review-runtime.test.ts`、`feishu-review.test.ts` | 明确委托及本人确认可触发；模糊请求不直接执行；未指派本人可审，草稿、关闭和外部项目仍拒绝；使用假 CLI，不读真消息 |
+| 审查与发布连续完成（CI-03） | L1 `tests/gitlab-integration.test.ts`、`gitlab-publish.test.ts`、`gitlab-answer.test.ts` | 开始、完成、回答和逐条发布时切换 CI，模型结果、P0/P1 自动发布、P2 本人确认与 manual 模式不被 CI 阻止 |
+| 去重与版本保护（CI-04） | L1 `gitlab-scan.test.ts`、`gitlab-integration.test.ts`、飞书 runtime 测试 | 交错到达的两入口请求不重复调用模型；CI 变化不再派单；head 变化阻止旧报告发布；未知写入结果不会盲目重发 |
+| 升级兼容（CI-05） | L0 `gitlab-config.test.ts`、`gitlab-manual.test.ts`；L1 集成与回答测试 | 旧 CI 配置及带 ci 的历史覆盖记录可用；旧报告和卡片可续办，标识不变；首次未派单 MR 在取消门槛后启动 |
+| 保留授权边界 | L0/L1 原有身份、项目、draft、manifest 与发布测试 | 错身份、未授权项目、过期 head、无本人批准的 P2 继续拒绝；CI 放宽不使它们通过 |
+
+实施时同步核对 `docs/protocol.md`、`docs/gitlab-review.md`、本方案原有 CI 表述、示例、两份 README、INSTALL、SECURITY、`skills/agent-autoloop/SKILL.md` 和架构图，删除现行说明中的旧门槛而保留兼容说明。纯方案阶段保留现状说明，避免把尚未实现的行为写成已上线能力。
+
+实施后运行 `npm run test:quick`、`npm run typecheck` 和 `npm run format:check`；本方案不涉及 kernel/protocol/sim 的实现、日志、到期表或并发机制变更，无需新增模拟与验证框架。真实部署只在授权环境验收；不运行真实交付脚本、不发真飞书消息。
+
+方案图仅做静态核对；环境没有 `mmdc`，未渲染图。真实 GitLab 与部署效果不属于隔离测试证据，实际交付验证见交付记录。
+
 **状态：已实现并在本机部署。当前采用每仓库唯一 main 审查工作树和 Codex 原生配置；验证范围见 [验证记录](local_agent_automation_evidence.md)。**
 
 **实施合同：**每个项目只使用一份专用的 `codereview-worktree`，从已配置裸缓存的可信远端 `main` 分支获取最新 commit；不存在时创建，存在时更新到该 commit。Codex 在该目录按原生机制读取仓库规则与 Skill，并执行唯一可信 `rules.prompt`；MR 标题、描述、版本和差异只是隔离资料。日常开发目录不 pull、reset 或切分支；不增加锁、并发协调、版本共存或调度。审查只读，不执行 MR 代码、测试、hooks 或发布。每轮记录实际 prompt、MR 与 main SHA；仅 MR head 变化触发重审，其他依据变化不使同一 head 的结果失效。旧 GitLab `skill`、`skillPath`、`projects.rules` 与 GitLab `rule.skill` 不兼容，必须移除。
@@ -19,7 +173,7 @@
 | 权限 | 按本机 Codex 原生配置执行只读审查任务 | 不额外覆盖用户配置，不承诺插件提供沙箱隔离 |
 | 通知 | 上游飞书通道与卡片 | 接受现成投递、回答、恢复语义，不新增 channel |
 
-保留 Reviewer/当前 SHA CI/无 CI/Draft 门槛；项目可显式允许当前 SHA 的 skipped CI、指定原生 Codex 与 Skill、精确版本和 Diff 位置校验。仓库默认人工确认；开启自动发布后发送合格 P0/P1/P2，P3 不发布。不自动改代码、Approve、Merge 或部署。
+保留 Reviewer 与 Draft 门槛，飞书委托只覆盖 Reviewer；扫描到评论发布均不以 CI 为门槛。使用原生 Codex 与 Skill，发布仍核对当前 head 和授权。仓库默认人工确认；开启自动发布后发送合格 P0/P1/P2，P3 不发布。不自动改代码、Approve、Merge 或部署。
 
 GitLab 目标项目、本人身份、模型和飞书收件人属于部署配置；真实写入验证只对明确授权的测试对象执行。
 
@@ -55,7 +209,7 @@ flowchart TB
     W -->|"argv / context.json"| CMD
     CMD -->|"scan"| P
     CMD -->|"review"| R
-    P -->|"读取 MR、身份、CI"| GL
+    P -->|"读取 MR、身份"| GL
     P -->|"POST /v1/events"| H
     R -->|"读取版本与 Diff；受控发布 Discussion"| GL
     R -->|"发送 MR 链接；保存报告和意图"| D
@@ -73,7 +227,7 @@ flowchart TB
 
 | 组件 | 责任 | 不承担的责任 |
 |---|---|---|
-| poll.ts | 分页读取授权项目，确定 Reviewer/Draft/CI，发稳定 ID 的来源事件 | 不调用模型，不改代码，不发布评论 |
+| poll.ts | 分页读取授权项目，确定 Reviewer/Draft，发稳定 ID 的来源事件 | 不调用模型，不改代码，不发布评论 |
 | run.ts | 核对 MR 版本，发送 prompt 与 MR 链接，运行 Codex，校验结果，生成 ask，校验回答，发布合格评论 | 不自建队列、Worker、并发槽位或失败计数 |
 | 私有工作目录 | 保存报告原文、确定的待发布文本、版本绑定和写入意图，供同机恢复 | 不保存另一套运行状态机，不替代上游事实日志 |
 | Codex CLI | 基于可信 Skill 与代码资料产出 Findings | 不持有 GitLab 写入身份，不决定授权，不自行调用发布 API |
@@ -99,7 +253,7 @@ flowchart TB
 
 上游允许多条规则匹配同一事件，所以配置验收必须保证每个 review 类型只命中一条审查规则，不假设存在“第一条胜出”的优先级。
 
-GitLab 实例、Project ID、本人账号、CLI 路径、模型、仓库发布模式与明确无 CI 的配置由部署填写。密钥由已有 CLI/私有配置管理，不写进规则示例或仓库。
+GitLab 实例、Project ID、本人账号、CLI 路径、模型、仓库发布模式由部署填写；旧 CI 配置仅兼容读取。密钥由已有 CLI/私有配置管理，不写进规则示例或仓库。
 
 ## 4. 单个 MR 的业务过程
 
@@ -115,8 +269,8 @@ sequenceDiagram
     participant W as Mac / 上游 Worker
     participant R as Mac / run.ts
     participant X as Mac / Codex CLI
-    P->>G: GET 分页 MR / 本人 / 当前 CI
-    G-->>P: Reviewer、Draft、Head、pipeline
+    P->>G: GET 分页 MR / 本人
+    G-->>P: Reviewer、Draft、Head（忽略 CI）
     P->>H: POST /v1/events（稳定 id / subject）
     H-->>P: event、duplicate、routed
     W->>H: GET /v1/work（claim / running）
@@ -218,7 +372,7 @@ sequenceDiagram
 | `projects[].projectPath` | 项目完整路径 | 须与 GitLab 元数据一致，裸缓存实际 origin 须等于该项目的 GitLab SSH 或 HTTP 远端 |
 | `projects[].rulesBranch` | `main` 或省略 | 每次获取可信远端 main；不从 MR 选择 |
 | `projects[].publication` | manual / auto；默认 manual | 不改变 P0–P2 范围 |
-| `projects[].ciMode` | required / confirmed-none / allow-skipped；默认 required | required 只接受当前 Head 的 success；confirmed-none 接受没有 pipeline 或当前 Head 的 success；allow-skipped 仅接受当前 Head 的 success 或 skipped，均须本人明确按项目配置 |
+| `projects[].ciMode` | required / confirmed-none / allow-skipped / checks；仅兼容读取 | 旧格式继续校验，所有模式均不影响审查、发布或新 policyHash；新配置省略 |
 | `projects[].cachePath` | 配置相对路径或绝对路径 | 裸 Git 缓存，不能是正在开发的工作树 |
 | `codexPath/glabPath` | 绝对可执行路径 | 不接受外部事件指定命令或 shell 片段 |
 
@@ -314,7 +468,7 @@ CLI 使用 `agent-autoloop answer <cardId> 1` 批准，2 拒绝；HTTP choice �
 |---|---|---|
 | 身份 | GET /user | id 必须等于配置 reviewerId |
 | 发现 | GET /projects/:id/merge_requests | query state=opened、page/per_page；遍历全部页并在本机核对 reviewer，以观察被移除后重新指定 |
-| 复核 | GET /projects/:id/merge_requests/:iid | state、draft、reviewers、sha、diff_refs、head_pipeline；缺字段不得自动放行 |
+| 复核 | GET /projects/:id/merge_requests/:iid | state、draft、reviewers、sha；必要字段缺失不得自动放行，head_pipeline 不再必需 |
 | 去重核查 | GET /projects/:id/merge_requests/:iid/discussions | 全页查询作者、正文标记、position 和远端标识 |
 | 评论 | POST /projects/:id/merge_requests/:iid/discussions | 无 query，body 见下；HTTP 201 后保存 Discussion id、notes[].id |
 
@@ -371,7 +525,7 @@ GitLab 没有与本地文件事务联动的“当前 Head 等于预期才创建 
 | 场景 | 级别 | 入口 | 可观测通过标准 |
 |---|---|---|---|
 | 上游协议与 Mac 状态恢复（SYS-01/07/09） | L1 | 已有 tests/conformance.test.ts | 既有接口、鉴权、重放通过 |
-| 准入、分页与规则（SYS-02/03、GL-01/02/03/05） | L2 | tests/gitlab-poll.test.ts | Reviewer、Draft、当前 CI、允许 skipped 和无 CI 配置均正确；多页无遗漏、无重复派单 |
+| 准入、分页与规则（SYS-02/03、GL-01/02/03/05） | L2 | tests/gitlab-poll.test.ts | Reviewer、Draft、CI 不阻塞及旧配置兼容均正确；多页无遗漏、无重复派单 |
 | 原生 Codex 与 MR 链接（SYS-04/05、GL-06/07/08） | L2 | `tests/gitlab-codex.test.ts`、`tests/gitlab-manifest.test.ts`、`tests/gitlab-integration.test.ts` | 假 Codex 验证原生参数、prompt+MR 链接及完整结果，拒绝任何插件 versions/diffs 请求；不调用真实模型 |
 | 人工回答接续（SYS-08、PUB-02/07/09） | L1 | tests/gitlab-review.test.ts | answers-only 可恢复；旧 SHA/变更内容/自由文本不授权 |
 | 同版本发布去重（PUB-01/04/08/10） | L2 | tests/gitlab-publish.test.ts | 超时/崩溃先核查，同条评论不盲重发；P3 不发 |
@@ -390,7 +544,7 @@ GitLab 没有与本地文件事务联动的“当前 Head 等于预期才创建 
 
 Mac 需具备 Node 24+、已登录的 Codex CLI、可读取目标 GitLab 并以本人身份评论的 glab、现成 lark-cli。实际项目、身份、模型及飞书收件人由私有配置提供；配置和凭据不提交到 Fork。
 
-GitLab 实例的 Diff/CI 字段、Codex 参数支持和飞书权限仍需真实验证。参数不受支持、对象读取失败或身份不符时停止业务执行并报告，不静默放宽权限。源码与文档核对不等于这些运行验收已经通过。
+GitLab 实例的 MR 字段、Codex 参数支持和飞书权限仍需真实验证。参数不受支持、对象读取失败或身份不符时停止业务执行并报告，不静默放宽权限。源码与文档核对不等于这些运行验收已经通过。
 
 真实 GitLab 和飞书写入只对本人明确授权的测试对象执行。
 
@@ -401,4 +555,4 @@ GitLab 规则的 `prompt` 是任务指令来源；旧 GitLab `skill`、`skillPat
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。
 
-自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、CI、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。
+自动重审只由 MR 提交版本（head SHA）变化触发。已投递的同一 head 不因 main、prompt、Skill、模型、发布配置、Reviewer 或 CI 状态变化再次派发。首次尚未满足准入的 MR，在合格后首次启动。真正审查任务开始时才更新 main 工作目录并加载可信 Job 指令；扫描不更新工作树或枚举 Skill。同一 head 复用最新已完成报告及其内容摘要，不改写时间和请求编号来制造新报告。main、prompt、Skill 和模型保留为审计依据，不用于使同一 head 的报告或批准失效。发布仍核对 MR head、当前项目身份、Reviewer 和明确授权；切换分级发布只重新分流已有 findings，不重新调用模型，旧的整份人工清单不会自动获得 P2 发布权限。

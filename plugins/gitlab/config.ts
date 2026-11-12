@@ -174,8 +174,6 @@ export function policyHash(config: Config, project: Project, instructionsDigest:
       projectPath: project.projectPath ?? null,
       rulesDigest: rulesDigest ?? null,
       publication: project.publication,
-      ciMode: project.ciMode,
-      ...(project.ciMode === "checks" ? { ciJobs: project.ciJobs, ciBridges: project.ciBridges ?? [] } : {}),
       model: config.model,
       effort: config.effort ?? null,
       instructionsDigest,
