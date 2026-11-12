@@ -102,10 +102,11 @@ export function jobOf(view: View, run: Row, env: Environment): Job {
       }),
       timers: timers.filter((timer) => eventIds.includes(timer.event_id)).map(timerView),
       waiting: waiting.sort((a, b) => a.at.localeCompare(b.at)).map(timerView),
-      open: openInScope(view, run).map(({ id, title, text, created_at }) => ({
+      open: openInScope(view, run).map(({ id, title, text, about, created_at }) => ({
         card: id,
         title,
         text,
+        about,
         at: created_at,
       })),
       decided: decided

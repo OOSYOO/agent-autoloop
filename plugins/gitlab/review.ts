@@ -53,12 +53,27 @@ export function selectRequest(
   return matches[0] ?? null;
 }
 export function obsoleteCards(
-  open: { card: number; title: string; text: string; at: string }[],
+  open: { card: number; title: string; text: string; at: string; about?: string }[],
   projectId: number,
   mrIid: number,
   head: string,
+  lookup?: (hash: string) => { projectId: number; mrIid: number; headSha: string },
 ): { card: number; reason: string }[] {
   return open.flatMap((card) => {
+    if (card.about && lookup) {
+      try {
+        const binding = JSON.parse(card.about);
+        if (binding.schema !== 1 || binding.kind !== "publish" || !/^[a-f0-9]{64}$/.test(binding.manifestHash))
+          return [];
+        const manifest = lookup(binding.manifestHash);
+        return manifest.projectId === projectId && manifest.mrIid === mrIid && manifest.headSha !== head
+          ? [{ card: card.card, reason: "MR 版本已变化" }]
+          : [];
+      } catch {
+        return [];
+      }
+    }
+    // Older cards predate structured open-card context.
     if (card.title !== "确认发布审查评论") return [];
     const match = /^MR (\d+)\/(\d+)，版本 ([a-f0-9]{40})，/.exec(card.text);
     if (!match || Number(match[1]) !== projectId || Number(match[2]) !== mrIid) return [];

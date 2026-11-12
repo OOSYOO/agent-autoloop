@@ -178,5 +178,5 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <text x="861" y="625" class="r" text-anchor="middle">核对线上版本</text>
 <rect class="plug" x="22" y="670" width="916" height="60" rx="14"/>
 <text x="40" y="693" class="r">GitLab：Reviewer 扫描 / 飞书消息委托 → 同一审查流程 → 原生 Codex + MR 链接</text>
-<text x="40" y="715" class="s">分级：P0/P1 自动发布 · P2 本人确认 · 零发现通知人工审核；不等 CI，仅 MR 提交变化重审</text>
+<text x="40" y="715" class="s">分级：P0/P1 自动发布 · P2 本人确认 · 飞书摘要与折叠原文；不等 CI，仅 MR 提交变化重审</text>
 </svg>

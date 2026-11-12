@@ -287,7 +287,7 @@ test("Feishu card URLs are clickable while finding text remains plain", () => {
   const elements = render(card).body.elements as any[];
   const links = elements.filter((x) => x.tag === "markdown");
   assert.equal(links.length, 2);
-  assert.equal(links[0].content, `[${url.replaceAll("_", "\\_")}](${url})`);
+  assert.equal(links[0].content, `[app · MR !80：查看代码变更](${url})`);
   assert.ok(
     elements.some((x) => x.text?.tag === "plain_text" && x.text.content.includes("**data** <at id=all>all</at>")),
   );
@@ -301,4 +301,17 @@ test("Feishu card URLs are clickable while finding text remains plain", () => {
     "https://git.local/<evil>",
   ])
     assert.ok(!(render({ ...card, text: `MR：${bad}` }).body.elements as any[]).some((x) => x.tag === "markdown"));
+});
+
+// Failure mode: secondary report content buries actions or becomes executable markup.
+test("full report folds without adding an answer callback", () => {
+  const card = render({ ...base, text: "请确认\n\n完整报告：\n<script>bad</script>\nhttps://example.com/report" });
+  const elements = card.body.elements as any[];
+  const panel = elements.find((e) => e.tag === "collapsible_panel");
+  assert.ok(panel);
+  assert.equal(panel.expanded, false);
+  assert.equal(panel.header.title.content, "查看完整报告");
+  assert.match(JSON.stringify(panel.elements), /plain_text.*<script>/);
+  assert.doesNotMatch(JSON.stringify(panel), /callback/);
+  assert.equal(elements.filter((e) => e.tag === "interactive_container").length, 2);
 });

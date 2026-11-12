@@ -54,6 +54,14 @@ test("rejecting an approved report does not require the network or current rule 
       items: [],
     });
     const cfg = { dataRoot: root, projects: [{ id: 42 }] } as any;
+    await assert.rejects(
+      resumeAnswer(cfg, {
+        ...answer,
+        options: ["发布 2 条评论", "不发布"],
+        about: JSON.stringify({ schema: 1, kind: "publish", manifestHash }),
+      }),
+      /确认数量与发布清单不一致/,
+    );
     const result = await resumeAnswer(cfg, {
       card: 1,
       title: "x",
@@ -107,4 +115,12 @@ test("approval requires a trusted configuration even for a legacy report", async
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Failure mode: the new short button bypasses exact choices or rejects still-open legacy cards.
+test("counted publication buttons keep manifest binding and strict choices", () => {
+  assert.equal(publishDecision({ ...answer, options: ["发布 2 条评论", "不发布"] }, hash), 0);
+  assert.equal(publishDecision({ ...answer, options: ["发布 0 条评论", "不发布"] }, hash), null);
+  assert.equal(publishDecision({ ...answer, options: ["发布 2 条评论", "随便"] }, hash), null);
+  assert.equal(publishDecision({ ...answer, options: ["发布 2 条评论", "不发布"] }, "b".repeat(64)), null);
 });

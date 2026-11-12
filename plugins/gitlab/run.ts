@@ -12,7 +12,7 @@ import { manifest, severityManifests } from "./manifest.ts";
 import { readRequests } from "./request.ts";
 import { trustedRules, verifyProjectRemote } from "./trusted-rules.ts";
 import { manualOverrides } from "./manual.ts";
-import { findingsPages } from "./presentation.ts";
+import { findingsPages, reviewSummary } from "./presentation.ts";
 import { answerOutcome } from "./outcome.ts";
 import { jobInstructions } from "./instructions.ts";
 import { nativeBasis } from "./native.ts";
@@ -99,7 +99,16 @@ async function main() {
     summary = "没事可做：MR 已合并或关闭";
     return;
   }
-  resolves.push(...obsoleteCards(context.open ?? [], project.id, first.mrIid, mr.sha));
+  resolves.push(
+    ...obsoleteCards(context.open ?? [], project.id, first.mrIid, mr.sha, (hash) => {
+      const man = loadArtifact(join(config.dataRoot, "gitlab"), "manifests", hash) as { reportHash: string };
+      return loadArtifact(join(config.dataRoot, "gitlab"), "reports", man.reportHash) as {
+        projectId: number;
+        mrIid: number;
+        headSha: string;
+      };
+    }),
+  );
   const records = readRequests(join(config.dataRoot, "gitlab"), project.id, first.mrIid);
   const local: Request[] = records.map((stored) => ({
     schema: 1,
@@ -254,16 +263,7 @@ async function main() {
     }
     const visible = modelReport.findings.filter((finding) => finding.severity === "P2" || finding.severity === "P3");
     if (!modelReport.findings.length || visible.length) {
-      const pages = findingsPages(
-        mrUrl,
-        selected.headSha,
-        reportHash,
-        project.id,
-        selected.mrIid,
-        reportPolicy,
-        visible,
-        split.manual.items,
-      );
+      const pages = findingsPages(mrUrl, visible, split.manual.items);
       if (split.manual.items.length) {
         const manualHash = saveArtifact(root, "manifests", { ...split.manual, ...requestBinding });
         const saved = await resumeSaved(latestConfig, manualHash, args[1]);
@@ -277,55 +277,49 @@ async function main() {
             pages.forEach((text, index) =>
               notices.push({
                 key: `findings:${reportHash}:${index}`,
-                title: `审查 findings ${index + 1}/${pages.length}`,
+                title: modelReport.findings.length
+                  ? `审查结果 ${index + 1}/${pages.length}`
+                  : "未发现问题，仍需人工审核",
                 text,
               }),
             );
           ask(
             `publish:${manualHash}`,
-            "确认发布审查评论",
+            `待确认：发布 ${split.manual.items.length} 条审查评论`,
             pages.length === 1
               ? pages[0]
-              : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${reportPolicy}，\nMR：${mrUrl}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
+              : reviewSummary(mrUrl, visible, split.manual.items.length) +
+                  `\n完整报告共 ${pages.length} 页，见配套通知。`,
             { schema: 1, kind: "publish", manifestHash: manualHash },
-            ["发布这份报告中的评论", "不发布"],
+            [`发布 ${split.manual.items.length} 条评论`, "不发布"],
           );
         }
       } else
         pages.forEach((text, index) =>
           notices.push({
             key: `findings:${reportHash}:${index}`,
-            title: `审查 findings ${index + 1}/${pages.length}`,
+            title: modelReport.findings.length ? `审查结果 ${index + 1}/${pages.length}` : "未发现问题，仍需人工审核",
             text,
           }),
         );
     }
-    summary = modelReport.findings.length ? "审查完成" : "0 条 findings，请继续人工 review / 审核";
+    summary = modelReport.findings.length ? "审查完成" : "未发现问题，仍需人工审核";
     return;
   }
   const value = {
     ...manifest(config.instanceKey, project.id, selected.mrIid, reportHash, reportPolicy, refs, modelReport.findings),
     ...requestBinding,
   };
-  const pages = findingsPages(
-    mrUrl,
-    selected.headSha,
-    reportHash,
-    project.id,
-    selected.mrIid,
-    reportPolicy,
-    modelReport.findings,
-    value.items,
-  );
+  const pages = findingsPages(mrUrl, modelReport.findings, value.items);
   if (!value.items.length) {
     pages.forEach((text, index) =>
       notices.push({
         key: `findings:${reportHash}:${index}`,
-        title: `审查 findings ${index + 1}/${pages.length}`,
+        title: modelReport.findings.length ? `审查结果 ${index + 1}/${pages.length}` : "未发现问题，仍需人工审核",
         text,
       }),
     );
-    summary = modelReport.findings.length ? "审查完成" : "0 条 findings";
+    summary = modelReport.findings.length ? "审查完成" : "未发现问题，仍需人工审核";
     return;
   }
   const manifestHash = saveArtifact(root, "manifests", value);
@@ -371,18 +365,19 @@ async function main() {
     pages.forEach((text, index) =>
       notices.push({
         key: `findings:${reportHash}:${index}`,
-        title: `审查 findings ${index + 1}/${pages.length}`,
+        title: modelReport.findings.length ? `审查结果 ${index + 1}/${pages.length}` : "未发现问题，仍需人工审核",
         text,
       }),
     );
   ask(
     `publish:${manifestHash}`,
-    "确认发布审查评论",
+    `待确认：发布 ${value.items.length} 条审查评论`,
     pages.length === 1
       ? pages[0]
-      : `MR ${project.id}/${selected.mrIid}，版本 ${selected.headSha}，策略 ${reportPolicy}，\nMR：${mrUrl}\n版本：${selected.headSha}\n报告：${reportHash}\n全部 findings 共 ${pages.length} 页，见同报告编号的通知；仅发布标记为“将发布”的项目。`,
+      : reviewSummary(mrUrl, modelReport.findings, value.items.length) +
+          `\n完整报告共 ${pages.length} 页，见配套通知。`,
     { schema: 1, kind: "publish", manifestHash },
-    ["发布这份报告中的评论", "不发布"],
+    [`发布 ${value.items.length} 条评论`, "不发布"],
   );
 }
 main()

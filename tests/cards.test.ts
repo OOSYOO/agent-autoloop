@@ -177,6 +177,7 @@ test("a run may resolve only what it was given to check, and a bad id doesn't sp
     job.context.open.map((c) => c.card),
     [mine],
   );
+  assert.equal(job.context.open[0].about, card(mine).about);
   const receipt = finish(
     job.run,
     job.token,

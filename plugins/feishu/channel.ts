@@ -56,7 +56,8 @@ export function render(card: Card) {
       const link = safeWebLink(match[0]);
       if (!link) continue;
       if (match.index > cursor) elements.push(plain(text.slice(cursor, match.index)));
-      const label = link.replace(/[\\[\]()*_]/g, "\\$&");
+      const mr = /\/([^/]+)\/-\/merge_requests\/(\d+)$/.exec(new URL(link).pathname);
+      const label = (mr ? `${mr[1]} · MR !${mr[2]}：查看代码变更` : link).replace(/[\\[\]()*_]/g, "\\$&");
       const target = link.replace(/[()[\]]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
       elements.push({ tag: "markdown", content: `[${label}](${target})` });
       cursor = match.index + link.length;
@@ -64,6 +65,20 @@ export function render(card: Card) {
     if (cursor < text.length) elements.push(plain(text.slice(cursor)));
     return elements;
   };
+  const boundary = "\n\n完整报告：\n";
+  const split = card.text.indexOf(boundary);
+  const content =
+    split < 0
+      ? linkedText(card.text)
+      : [
+          ...linkedText(card.text.slice(0, split)),
+          {
+            tag: "collapsible_panel",
+            expanded: false,
+            header: { title: { tag: "plain_text", content: "查看完整报告" } },
+            elements: linkedText(card.text.slice(split + boundary.length)),
+          },
+        ];
   const afterwards = outcome ? [plain(outcome)] : [];
   return {
     schema: "2.0",
@@ -73,7 +88,7 @@ export function render(card: Card) {
       template: card.state === "open" ? "blue" : card.state === "closed" ? "grey" : "green",
     },
     body: {
-      elements: [...linkedText(card.text), ...(card.state === "open" ? card.options.map(option) : afterwards)],
+      elements: [...content, ...(card.state === "open" ? card.options.map(option) : afterwards)],
     },
   };
 }
