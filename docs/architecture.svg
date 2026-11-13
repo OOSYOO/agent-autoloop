@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 750" role="img" aria-labelledby="t">
 <title id="t">Agent Autoloop 架构图：内核在中间，其他都是插件</title>
-<desc>GitLab 使用通用 cron 和标准插件；扫描与审查可同机运行在远程 Worker，中台和通道留在 Mac。每仓库复用 main 审查工作树，在其中启动 Codex 原生规则和 Skill 发现；可信 prompt 与固定 SHA 的 MR Git 对象进入只读审查，依据摘要贯穿缓存和批准。</desc>
+<desc>GitLab 使用通用 cron 和标准插件；扫描与审查可同机运行在远程 Worker，中台和通道留在 Mac。每仓库复用 main 审查工作树，每轮更新时清除专用目录的未提交改动和未跟踪文件，在其中启动 Codex 原生规则和 Skill 发现；可信 prompt 与固定 SHA 的 MR Git 对象进入只读审查，依据摘要贯穿缓存和批准。</desc>
 <defs>
 <style>
 svg{--bg:#faf9f5;--ink:#1d1c19;--muted:#6e6b64;--line:#d6d3cb;--card:#fff;--item:#f4f2ec;--accent:#c2491d;--core:#1d1c19;--core-ink:#faf9f5;--core-duty:#33302a;--core-chip:#282621;--core-line:#423f38;--core-sub:#b9b5ab;--core-accent:#ef8a62;--tag-bg:#3d261c;--tag-ink:#ffb08e;--you-bg:#fff4ee}

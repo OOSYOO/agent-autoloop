@@ -54,22 +54,6 @@ export function prepareWorktree(cachePath: string, branch = "main", path = revie
     if (owner.schema !== 1 || owner.path !== path || owner.cache !== bare) throw new Error("审查目录归属不匹配");
     const common = execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { env, encoding: "utf8" }).trim();
     if (realpathSync(resolve(path, common)) !== bare) throw new Error("审查工作树来源不匹配");
-    const dirty = execFileSync(
-      "git",
-      [
-        "-C",
-        path,
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-      ],
-      { env, encoding: "utf8" },
-    ).trim();
-    if (dirty) throw new Error("专用审查工作树包含未提交改动");
   } else if (existsSync(marker)) throw new Error("专用审查目录缺失，需检查归属");
   const ref = "refs/agent-autoloop/review-main";
   git(
@@ -91,5 +75,9 @@ export function prepareWorktree(cachePath: string, branch = "main", path = revie
     ["-C", path, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "reset", "--hard", commit],
     { env, stdio: "ignore" },
   );
+  execFileSync("git", ["-C", path, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "clean", "-fd"], {
+    env,
+    stdio: "ignore",
+  });
   return commit;
 }

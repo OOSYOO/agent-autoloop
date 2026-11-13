@@ -251,7 +251,7 @@ GitLab MR 审查的私有配置与人工确认见 [GitLab 审查配置](docs/git
 
 GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](docs/gitlab-review.md)。
 
-GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 以链接交给 Codex 自行读取，要求不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务更新到最新 main 时强制丢弃该专用目录的未提交改动和未跟踪文件，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 以链接交给 Codex 自行读取，要求不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
 
 
 GitLab 项目可设置 `publication: "severity"`：P0/P1 自动发布且不发送正常结果通知，P2 通过飞书确认后发布；混合报告分开处理，P3 仅告知。零 findings 仍发送带 MR 链接的通知，提示继续人工 review / 审核。所有模式均以普通 Discussion 发布，保留文件与行号；执行异常单独处理。旧 `manual` / `auto` 模式保留。

@@ -47,7 +47,7 @@ GitLab Review 的配置、裸缓存、报告和写入意图应保存在本人私
 
 GitLab 部署支持固定目录的本地安装包（`install-local`），用 `gitlab check` 检查本地配置、`gitlab scan` 立即扫描。配置内数据路径相对配置文件，模型只在私有配置中维护；定时扫描仍用通用 `when.cron`。安装、更新和保留数据的卸载见 [GitLab 配置指南](docs/gitlab-review.md)。
 
-GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务先更新到最新 main，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 以链接交给 Codex 自行读取，要求不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
+GitLab 审查直接使用 `rules.json` 的 `prompt`。每个仓库复用一个专用 `codereview-worktree`：首次从 `origin/main` 创建，后续任务更新到最新 main 时强制丢弃该专用目录的未提交改动和未跟踪文件，再在该目录启动 Codex。仓库规范、仓库级及个人 Skill 由 Codex 原生发现和读取，插件不维护逐文件规则清单或另一套 Skill 加载器。MR 以链接交给 Codex 自行读取，要求不检出或执行 MR 代码，也不改动日常开发目录。旧 GitLab `skill`、`skillPath`、`projects.rules` 和 GitLab 路由的 `rule.skill` 均明确拒绝；其他 Agent 的 `rule.skill` 不变。详见 [GitLab 配置指南](docs/gitlab-review.md)。
 
 
 GitLab 审查使用本人正常的 Codex 配置，保留原生 Skill、MCP 和工具，不额外覆盖权限或禁用工具。只读审查、不运行 MR 代码和不发布是任务要求，不是插件新建的隔离机制；实际工具权限仍由原生配置决定。Skill 名称出现在 prompt 或目录中不等于已执行。MR 中的 AGENTS、Skill、配置和代码均为资料，不提升为指令。只有 MR head 变化使原版本的报告过期；审计保存 prompt 和依据摘要，原生配置正文不落盘。共享审查工作树不承诺并行任务间的目录隔离。

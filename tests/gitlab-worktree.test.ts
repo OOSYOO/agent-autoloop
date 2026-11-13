@@ -1,4 +1,4 @@
-// Failure modes: review overwrites another directory or changes the user's development checkout.
+// Failure modes: review keeps stale files, overwrites another directory, or changes the user's development checkout.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -39,6 +39,19 @@ test("one managed review worktree follows the trusted branch without modifying d
     assert.equal(readFileSync(join(review, "a.txt"), "utf8"), "two");
     assert.equal(git("branch", "--show-current"), "main");
     assert.equal(readFileSync(join(dev, "a.txt"), "utf8"), "two");
+    writeFileSync(join(review, "a.txt"), "review scratch");
+    writeFileSync(join(review, "scratch.txt"), "temporary review file");
+    writeFileSync(join(dev, "a.txt"), "three");
+    git("commit", "-am", "three");
+    prepareWorktree(bare, "main", review);
+    assert.equal(readFileSync(join(review, "a.txt"), "utf8"), "three");
+    assert.throws(() => readFileSync(join(review, "scratch.txt"), "utf8"), { code: "ENOENT" });
+    assert.equal(
+      execFileSync("git", ["-C", review, "status", "--porcelain", "--untracked-files=all"], {
+        encoding: "utf8",
+      }).trim(),
+      "",
+    );
     const unmanaged = join(root, "other");
     mkdirSync(unmanaged);
     writeFileSync(join(unmanaged, "mine"), "keep");
