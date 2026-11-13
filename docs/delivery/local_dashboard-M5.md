@@ -2,7 +2,7 @@
 
 - 方案：../specs/local_dashboard.md；计划：../plans/local_dashboard.md 新方案执行。
 - 起点及被测实现：`52063bd`，分支 `main`。无新工程范围；M4 已完成完整实现，M5 核实安装和整体交付，组织本人 L4。
-- 状态：本人于 2026-11-13 明确回复“这样可以了，验收通过，继续完成交付收尾”；最终实现 `9cf22c8` 的 L4 通过，临时环境已清理。最终累计审查 3/3，findings 为空，CI 修复 0/3；PR/CI 收尾中。
+- 状态：本人于 2026-11-13 明确回复“这样可以了，验收通过，继续完成交付收尾”；最终实现 `9cf22c8` 的 L4 通过，临时环境已清理。最终累计审查 3/3，findings 为空，CI 修复 0/3。M5 本地里程碑完成；汇总 PR 为 [#6](https://github.com/OOSYOO/agent-autoloop/pull/6)，最终 CI 与可审阅状态以 PR 检查页为准。
 
 ## 自动验证与范围证据
 
@@ -61,4 +61,8 @@ M4 的 417 项全量测试含 200000 步模拟、40320 条穷举路径；之后�
 - 事实证据：answer seq=38，card=1/state=decided/choice=1/answer=null/by=本人；seq=39，card=2/state=closed；seq=40，card=3/state=closed（临时离线通知）。补充操作由 agent 执行，仅作用于临时 HOME；未发送真实评论或通道消息。证据 `/tmp/local-dashboard-closeout-evidence.json`，截图 `/Users/shenyue/.codex/visualizations/2026/11/13/01a1d2dd-095e-7582-9379-3a00161df05b/local-dashboard-passed.png`。空列表由既有自动化验证覆盖，不宣称截图中新增离线通知不存在。
 - 最终 `9cf22c8` 的 `sh scripts/install-smoke.sh` 再跑一次，退出 0；日志 `/tmp/local-dashboard-final-install.log`。此前全量内核模拟/穷举和最终 419 项快速回归、类型/格式检查依然有效，本次只变更记录。
 - 验收浏览器标签页已关闭，PID 84167 已 SIGTERM 退出，临时 HOME 已确认删除；入口脚本已删除。其余测试证据日志保留。发现另有旧独立看板 server.js（PID 89733），非本次启动，未停止；旧目录 M3 交付记录改动也未动。新维护入口仍为本仓库 dashboard/。
-- 当前下一动作：推送专用远端分支、创建 PR、确认 ubuntu/macOS Node 24 CI 并记录链接；不自动合并或部署。
+- 汇总 PR 已创建：[OOSYOO/agent-autoloop#6](https://github.com/OOSYOO/agent-autoloop/pull/6)，远端分支 codex/local-dashboard，目标 main；本地仍为 main。后续在 PR 描述记录最终 CI 链接并在检查通过后解除 Draft，不自动合并或部署。
+
+## 交接结果
+
+M4/M5 的工程与本人验收均完成，最终业务代码为 `9cf22c8`，收尾记录为 `96aaed3` 及包含本节的文档提交。最后两笔只改变文档，既有测试和独立审查证据继续有效。最终远端检查在 [PR #6 检查页](https://github.com/OOSYOO/agent-autoloop/pull/6/checks) 持续对应当前 PR head，CI 链接与结果同步 PR 描述；CI 失败则不解除 Draft。合并、发布、部署与正式环境试用不在本次交付中。
