@@ -1,8 +1,5 @@
 name: check
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -22,7 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # These jobs stay required on main, so a docs change runs them too and they pass without doing anything.
+      # Optional cross-platform verification; local checks are the merge gate.
       - id: scope
         env:
           BEFORE: ${{ github.event.before }}
