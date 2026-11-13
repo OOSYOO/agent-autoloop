@@ -29,7 +29,7 @@ GitLab 扩展运行在接单程序所在的 Mac 或 Linux。它使用现有的�
 }
 ```
 
-`projectPath` 必须与 GitLab 项目路径一致，裸缓存 origin 必须对应同一项目；`rulesBranch` 仅接受 `main`，省略时也使用 `main`。每个裸缓存旁派生一份专用 `<缓存名>.codereview-worktree`：每轮从远端更新到最新可信分支 commit，Codex 在这里原生读取仓库规则与 Skill。目录归属不匹配或有未提交改动时停止，不覆盖别人的目录。日常开发目录不会被 pull、reset 或切换分支。MR 的 Head、描述和差异仅作为独立文字资料，不被当成规则；不执行 MR 代码、测试或 hooks。共享审查目录按任务更新，不提供多版本隔离。
+`projectPath` 必须与 GitLab 项目路径一致，裸缓存 origin 必须对应同一项目；`rulesBranch` 仅接受 `main`，省略时也使用 `main`。每个裸缓存旁派生一份专用 `<缓存名>.codereview-worktree`：每轮从远端更新到最新可信分支 commit，强制丢弃该专用目录的未提交改动和未跟踪文件，Codex 在这里原生读取仓库规则与 Skill。目录归属不匹配时停止，不覆盖别人的目录。日常开发目录不会被 pull、reset 或切换分支。MR 的 Head、描述和差异仅作为独立文字资料，不被当成规则；不执行 MR 代码、测试或 hooks。共享审查目录按任务更新，不提供多版本隔离。
 
 `publication` 可选 `manual`、`auto` 或 `severity`，缺省为 `manual`。GitLab Reviewers 包含本人或飞书委托即可触发；CI 失败、运行中、跳过、无流水线或旧 SHA 均不阻止审查和评论发布。仍要求 MR 已打开且非草稿，并校验身份、项目、版本及发布授权。可选 `effort` 与上游 Agent 的 effort 一致；省略时使用 Codex 默认。运行参数中的模型和 effort 必须与配置一致。
 

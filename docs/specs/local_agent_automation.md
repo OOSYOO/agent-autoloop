@@ -156,7 +156,7 @@ sequenceDiagram
 
 **状态：已实现并在本机部署。当前采用每仓库唯一 main 审查工作树和 Codex 原生配置；验证范围见 [验证记录](local_agent_automation_evidence.md)。**
 
-**实施合同：**每个项目只使用一份专用的 `codereview-worktree`，从已配置裸缓存的可信远端 `main` 分支获取最新 commit；不存在时创建，存在时更新到该 commit。Codex 在该目录按原生机制读取仓库规则与 Skill，并执行唯一可信 `rules.prompt`；MR 标题、描述、版本和差异只是隔离资料。日常开发目录不 pull、reset 或切分支；不增加锁、并发协调、版本共存或调度。审查只读，不执行 MR 代码、测试、hooks 或发布。每轮记录实际 prompt、MR 与 main SHA；仅 MR head 变化触发重审，其他依据变化不使同一 head 的结果失效。旧 GitLab `skill`、`skillPath`、`projects.rules` 与 GitLab `rule.skill` 不兼容，必须移除。
+**实施合同：**每个项目只使用一份专用的 `codereview-worktree`，从已配置裸缓存的可信远端 `main` 分支获取最新 commit；不存在时创建，存在时强制丢弃未提交改动和未跟踪文件并更新到该 commit。Codex 在该目录按原生机制读取仓库规则与 Skill，并执行唯一可信 `rules.prompt`；MR 标题、描述、版本和差异只是隔离资料。日常开发目录不 pull、reset 或切分支；不增加锁、并发协调、版本共存或调度。审查只读，不执行 MR 代码、测试、hooks 或发布。每轮记录实际 prompt、MR 与 main SHA；仅 MR head 变化触发重审，其他依据变化不使同一 head 的结果失效。旧 GitLab `skill`、`skillPath`、`projects.rules` 与 GitLab `rule.skill` 不兼容，必须移除。
 
 目标：复用 agent-autoloop，在 Mac 上以最少业务扩展跑通 GitLab Review。有效需求见 [PRD v1.2](../../Local_Agent_Automation_PRD_v1.0.md)。本文件定义实施契约，不代表验收已经完成。
 

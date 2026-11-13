@@ -240,7 +240,7 @@ Linux 可复用 [host/service.ts](../../host/service.ts) 的 systemd 用户服�
 |---|---|---|---|
 | 远程领活与人工回答回到原 Worker | L1 | tests/gitlab-integration.test.ts 与 tests/worker.test.ts：Hub 与 Worker 使用独立临时 HOME | 目标 worker 收到 scan/review，answers-only 从服务器报告恢复；保留 run、worker 与请求记录路径 |
 | 扫描与审查使用同一依据 | L1 | tests/gitlab-native.test.ts、tests/gitlab-instructions.test.ts；tests/gitlab-integration.test.ts 双 HOME 场景 | 改服务器 Skill 或 prompt 会使旧依据失效；Mac 不需要目标仓库缓存；保留测试名与退出码 |
-| 只读 Git 对象及目录安全 | L1 | tests/gitlab-manifest.test.ts、tests/gitlab-worktree.test.ts、tests/gitlab-integration.test.ts | MR 指令不作为规则；脏审查目录拒绝覆盖；开发目录无变化；保留测试断言与退出码 |
+| 只读 Git 对象及目录安全 | L1 | tests/gitlab-manifest.test.ts、tests/gitlab-worktree.test.ts、tests/gitlab-integration.test.ts | MR 指令不作为规则；专用审查目录强制清理并跟随可信 main；非本安装目录拒绝覆盖；开发目录无变化；保留测试断言与退出码 |
 | 人工确认后才发布且旧批准失效 | L1 | tests/gitlab-review.test.ts、tests/gitlab-publish.test.ts、tests/gitlab-answer.test.ts | 使用假 GitLab；确认前无写入，版本变化不发布，响应丢失不重复发；保留请求日志 |
 | 断网、重启与结果恢复 | L1 | tests/worker.test.ts；tests/worker.test.ts 双进程 Hub 断开场景 | 结果在服务器落盘，重连不重做业务；保留 run ID、调用计数和回执 |
 | 停止进程组与 capacity=1 | L1 | tests/worker.test.ts | 子进程全部结束后上报取消，扫描与审查最多一轮执行；保留测试名与退出码 |
