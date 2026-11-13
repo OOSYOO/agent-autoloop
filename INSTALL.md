@@ -119,3 +119,9 @@ GitLab 审查从扫描到评论发布均不等待 CI；旧 CI 配置仅兼容读
 GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发送 rules.prompt 与 MR 链接（附当前提交供核对）。插件不预下载、转换或校验 MR Diff，不准备 MR Git 对象或上下文副本；MR 的读取由 Codex 按 Skill 自行完成。发布统一使用普通 Discussion，正文保留文件和行号；发布前仍核对版本、策略和授权。同一 head 的 findings 可复用；发布清单的授权范围仍逐项核对。
 
 飞书可作为 GitLab 审查的第二入口：用本人身份轮询群聊 @ 和私聊，明确请求自动审查、模糊请求用卡片确认。只覆盖 Reviewer，保留草稿和发布策略，CI 不再作为门槛；同 head 不重复派发，不回复同事。使用标准 `feishu` Agent 插件，显式配置后启用；权限、串行接入与部署见[飞书消息委托审查](docs/gitlab-review.md#飞书消息委托审查)。
+
+## 本地任务看板
+
+安装包已经包含看板，无需另装项目。运行 `agent-autoloop dashboard` 后打开打印的地址，默认 `http://127.0.0.1:3352`；用 `PORT=3353 agent-autoloop dashboard` 改端口。配置沿用 `AGENT_AUTOLOOP_HOME/config.json` 中的回环中台地址和本人密钥；中台离线时页面提示连接失败。看板不启动中台，不自动打开浏览器，Ctrl-C 只关闭看板，任务和通道继续运行。
+
+升级顺序：先 Ctrl-C 退出看板，再按当前安装方式运行安装或更新命令，最后重启 `agent-autoloop dashboard` 并重新加载浏览器页面。更新命令不会自动重启看板；旧页面遇到进程变化会禁用提交并提示重载。旧独立看板目录不再是运行依赖，不要同时运行两份占用同一端口。

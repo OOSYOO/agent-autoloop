@@ -1,0 +1,31 @@
+export type Card = {
+  id: number;
+  version: number;
+  kind: string;
+  state: string;
+  title: string;
+  text: string;
+  options: string[];
+  recommend: number | null;
+  choice: number | null;
+  answer: string | null;
+  by: string | null;
+  result: string | null;
+  rule: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  closedAt: string | null;
+  ref: string | null;
+  link: string | null;
+};
+export type Counts = { running: number; queued: number; retrying: number; unknown: number };
+export type State = {
+  now: string;
+  timezone: string;
+  totals: { running: number; doneToday: number };
+  cards: Card[];
+  recentCards: Card[];
+  lines: { id: string; name: string; every: string | null; next: string | null; totals: Counts }[];
+  elsewhere: { id: string; name: string; every: string; next: string; where: string }[];
+};
+export type Answer = { changed: boolean; state: string };

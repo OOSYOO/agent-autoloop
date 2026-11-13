@@ -9,9 +9,11 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
 up_pid=""
+dashboard_pid=""
 
 cleanup() {
   code=$?
+  if [ -n "$dashboard_pid" ]; then kill "$dashboard_pid" 2>/dev/null || true; fi
   if [ -n "$up_pid" ]; then kill "$up_pid" 2>/dev/null || true; fi
   if [ "$code" -ne 0 ] && [ -f "$work/up.log" ]; then
     echo "--- up.log"
@@ -93,6 +95,18 @@ agent-autoloop --version | grep -q "$commit" || fail "--version doesn't say $com
 agent-autoloop up >"$work/up.log" 2>&1 &
 up_pid=$!
 wait_for "up didn't start" healthy
+
+dashboard_port=$(node -e 'const s = require("net").createServer().listen(0, "127.0.0.1", () => { console.log(s.address().port); s.close(); })')
+PORT="$dashboard_port" agent-autoloop dashboard >"$work/dashboard.log" 2>&1 &
+dashboard_pid=$!
+dashboard_ready() { curl --noproxy '*' -fsS "http://127.0.0.1:$dashboard_port/app-controller.js"; }
+wait_for "installed dashboard didn't start" dashboard_ready
+curl --noproxy '*' -fsS "http://127.0.0.1:$dashboard_port/api/state" >"$work/dashboard-state.json"
+kill "$dashboard_pid"
+wait "$dashboard_pid"
+dashboard_pid=""
+healthy >/dev/null || fail "quitting dashboard stopped hub"
+
 
 agent-autoloop try </dev/null >"$work/try.out" 2>&1 || {
   cat "$work/try.out"

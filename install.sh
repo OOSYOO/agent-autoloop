@@ -25,6 +25,7 @@ command -v git >/dev/null || { echo "需要 git。"; exit 1; }
 command -v node >/dev/null || need_node "需要 Node.js 24 或更新，这台电脑上没找到。"
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' || need_node "需要 Node.js 24 或更新，现在是 $(node -v)。"
 
+echo "更新前请先退出看板；安装/更新后重新运行 agent-autoloop dashboard 并重新加载页面。"
 mkdir -p -m 700 "$ROOT"
 chmod 700 "$ROOT"
 if [ -d "$APP/.git" ]; then git -C "$APP" pull --ff-only --quiet; else git clone --quiet --depth 1 -- "$REPO" "$APP"; fi

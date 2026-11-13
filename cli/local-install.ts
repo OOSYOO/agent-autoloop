@@ -15,7 +15,18 @@ import {
   writeFileSync,
 } from "node:fs";
 
-const entries = ["bin", "cli", "host", "kernel", "protocol", "worker", "plugins", "skills", "package.json"];
+const entries = [
+  "bin",
+  "cli",
+  "host",
+  "kernel",
+  "protocol",
+  "worker",
+  "plugins",
+  "skills",
+  "dashboard",
+  "package.json",
+];
 const kind = "agent-autoloop-local-install";
 const quote = (text: string) => `'${text.replaceAll("'", `'"'"'`)}'`;
 export function localWrapper(home: string): string {

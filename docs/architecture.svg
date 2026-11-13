@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 750" role="img" aria-labelledby="t">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 820" role="img" aria-labelledby="t">
 <title id="t">Agent Autoloop 架构图：内核在中间，其他都是插件</title>
 <desc>GitLab 使用通用 cron 和标准插件；扫描与审查可同机运行在远程 Worker，中台和通道留在 Mac。每仓库复用 main 审查工作树，每轮更新时清除专用目录的未提交改动和未跟踪文件，在其中启动 Codex 原生规则和 Skill 发现；可信 prompt 与固定 SHA 的 MR Git 对象进入只读审查，依据摘要贯穿缓存和批准。</desc>
 <defs>
@@ -40,7 +40,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--accent)"/></marker>
 <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--muted)"/></marker>
 </defs>
-<rect class="bg" x="0" y="0" width="960" height="750" rx="18"/>
+<rect class="bg" x="0" y="0" width="960" height="820" rx="18"/>
 
 <!-- 顶部自动闭环回弧：自己干完 / 到点复查 -> 回到内核 -->
 <path class="back" d="M851 66V28H480V63"/>
@@ -179,4 +179,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <rect class="plug" x="22" y="670" width="916" height="60" rx="14"/>
 <text x="40" y="693" class="r">GitLab：Reviewer 扫描 / 飞书消息委托 → 同一审查流程 → 原生 Codex + MR 链接</text>
 <text x="40" y="715" class="s">分级：P0/P1 自动发布 · P2 本人确认 · 飞书摘要与折叠原文；不等 CI，仅 MR 提交变化重审</text>
+<rect class="plug" x="22" y="748" width="916" height="52" rx="14"/>
+<text x="40" y="770" class="r">本机看板 dashboard/：同仓库独立进程 → 本人 HTTP → 中台；内核不导入界面</text>
+<text x="40" y="790" class="s">汇总 · 待我处理 · 定时任务；原选项审批 / 通知已处理；退出看板不停止任务</text>
 </svg>

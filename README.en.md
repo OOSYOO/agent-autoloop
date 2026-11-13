@@ -16,7 +16,7 @@ Most of us use command-line agents like Claude Code or Codex by babysitting a te
 
 - **One machine, one install command.** Runs on your Mac or Linux machine. No cloud server or inbound ports required.
 - **Connect a new agent in one line.** No SDK, no agent source code to fork. Any CLI tool that takes a prompt and prints a final reply can plug in.
-- **No web dashboard.** Cards reach you on Feishu, DingTalk, WeCom, Slack, Discord, or desktop notifications when you are needed. Everything else is one command away.
+- **Local dashboard and decisions.** Run `agent-autoloop dashboard` and open the printed local URL. View totals, pending cards and schedules; choose an original answer or acknowledge a notice. Channels and the CLI remain available.
 
 ## Get started
 
@@ -270,3 +270,5 @@ GitLab review starts native Codex in the trusted main worktree and sends the con
 Feishu can provide a second GitLab review entry point: poll mentions and direct messages as the user, automatically accept explicit requests, and ask through a card when ambiguous. Only the Reviewer gate is overridden; draft and publication policies remain in force. CI does not gate review or publication. The same head is not dispatched twice, and colleagues receive no automatic chat replies. Enable the standard `feishu` Agent explicitly; see [message-based review setup](docs/gitlab-review.md#飞书消息委托审查).
 
 GitLab review cards show the MR link, brief problem/impact summaries, suggestions and the number of comments awaiting approval. Feishu folds full locations, evidence and publication scope under “查看完整报告”. Long reports use numbered notifications. Audit hashes stay internal; full comments, publication checks and answers to existing cards remain supported. Previews are shortened from the original text and show at most five findings.
+
+The dashboard is a separate foreground process at `http://127.0.0.1:3352` (`PORT` overrides it). Quitting it leaves hub tasks running. Before upgrading, quit the dashboard; after installation/update, restart it and reload the page. It is for the local owner only, with no history lists, text answers or task controls.
