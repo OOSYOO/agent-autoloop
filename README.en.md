@@ -242,7 +242,7 @@ For automated workloads, providers generally recommend using API keys rather tha
 | `skills/agent-autoloop/` | The hub's configuration and operation manual, also made available to agents during installation |
 | `docs/` | Protocol, plugin guide, and Chinese / English architecture diagrams |
 | `tests/`, `sim/` | Everyday behavior tests, simulation, enumeration, crash tests, and mutation checks |
-| `scripts/`, `.github/workflows/` | Performance and real-agent checks, installation smoke scripts, and Linux / macOS CI |
+| `scripts/`, `.github/workflows/` | Performance and real-agent checks, installation smoke scripts, and optional manual Linux / macOS CI |
 | Root documents and `install.sh` | Chinese / English READMEs, installation, security, development guidelines, license, and installer |
 
 Start reading at `bin/agent-autoloop.ts` → `cli/main.ts`, then follow the feature into `host/`, `worker/`, or `plugins/`. Read the [protocol](docs/protocol.md) for kernel design. Similarly named files serve different layers: `host/http.ts` adapts Node requests while `kernel/http.ts` defines endpoint behavior; `protocol/rules.ts` validates input while `kernel/rules.ts` defines rule types and matching.
