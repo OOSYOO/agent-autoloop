@@ -11,7 +11,7 @@ description: 配置 Agent 自动化中台：加规则、接新的事件插件、
 
 `agent-autoloop status` 列出谁在线、等用户什么、在做什么、做过什么，还有按完成时间统计的今天和最近 7 天的轮数、Token 和费用（同一轮重试的已报用量相加，没上报的轮数会写出来）。`agent-autoloop answer <卡片> <序号>` 回答，`agent-autoloop resolve <卡片> <结果>` 结案，`agent-autoloop stop <第几轮>` 停掉一轮，等整个进程组退出才报告已停。
 
-这里没有网页。用户想要一个页面看全局，就替他写一个：读 `GET /v1/state`，密钥是 `config.json` 的 `owner`，请求见 `docs/protocol.md` 的「本人」一节。
+本机看板运行 `agent-autoloop dashboard`，打开打印的回环地址即可看汇总、待处理和定时任务，提交问题原选项或处理通知。它是独立进程，退出不停止中台；升级先退出，再安装/更新，随后重启并重新加载页面。文字回答仍走原通道或 CLI。不要另建看板项目；其他客户端仍可用 `GET /v1/state` 等本人接口，见 `docs/protocol.md`。
 
 ## 改规则
 

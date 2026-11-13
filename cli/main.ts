@@ -23,6 +23,7 @@ const HELP = `Agent 自动化中台
   agent-autoloop why <第几轮> [--json]  查看时间线；--json 输出原始事实
   agent-autoloop conformance <地址> --config <测试凭据文件>
                                     在测试中台上检查协议
+  agent-autoloop dashboard               打开本地看板进程；更新前退出，更新后重启并重新加载页面
   agent-autoloop status                  现在什么情况：谁在线、等你什么、在做什么、做过什么、花了多少
   agent-autoloop answer <卡片> [序号] [--text 别的想法]
                                     回答一张卡片；通知不用写序号
@@ -516,6 +517,7 @@ function addPlugin(args: string[]) {
 }
 
 async function update() {
+  console.log("请先退出看板；更新后重新启动 agent-autoloop dashboard 并重新加载页面。");
   if (existsSync(path.join(ROOT, "local-install.json")))
     return fail("这是本地安装包。请在新版源码目录运行 install-local，再从安装目录重启服务。");
   const pulled = spawnSync("git", ["-C", ROOT, "pull", "--ff-only"], { stdio: "inherit" });
@@ -541,11 +543,12 @@ const commands: Record<string, () => unknown> = {
     if (runningUp() !== null) throw new Error("请先停止当前实例，再安装；安装不会中断正在进行的审查。");
     const { installLocal } = await import("./local-install.ts");
     const program = installLocal(ROOT, HOME);
-    console.log(`已安装：${program}。配置和数据保留在 ${HOME}。`);
+    console.log(`已安装：${program}。配置和数据保留在 ${HOME}。请重新启动看板并重新加载页面。`);
   },
   join: () => join(args),
   up: async () => (await import("../host/up.ts")).up(),
   try: tryIt,
+  dashboard: async () => (await import("./dashboard.ts")).dashboard(),
   status,
   why: () => why(args),
   conformance: () => checkConformance(args),

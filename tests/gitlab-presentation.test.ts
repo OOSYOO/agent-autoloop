@@ -55,3 +55,17 @@ test("decision preview is short and full evidence stays below the report boundar
   assert.doesNotMatch(text, /a{40}|b{64}|c{64}/);
   assert.match(detail, /293 与 368 行矛盾/);
 });
+
+// Failure mode: pending approvals from different repositories/MRs look identical until opened.
+test("MR identity and title appear before findings on every report page", () => {
+  const context = { projectPath: "team/app", mrIid: 7, title: "修复登录状态\n<script>资料</script>" };
+  const pages = findingsPages("https://gitlab.example.com/team/app/-/merge_requests/7", [finding], [], context);
+  assert.match(pages[0].split("\n\n")[0], /仓库：team\/app\nMR：!7\nMR 标题：修复登录状态 <script>资料<\/script>/);
+  const many = Array.from({ length: 10 }, () => ({ ...finding, evidence: "字".repeat(1000) }));
+  const split = findingsPages("https://gitlab.example.com/team/app/-/merge_requests/7", many, [], context);
+  assert.ok(split.length > 1);
+  for (const page of split) {
+    assert.match(page, /MR 标题：修复登录状态/);
+    assert.ok([...page].length <= 4000);
+  }
+});

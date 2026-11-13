@@ -9,7 +9,9 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "bin",
@@ -22,6 +24,7 @@
     "kernel",
     "protocol",
     "sim",
-    "examples/recipes"
+    "examples/recipes",
+    "dashboard"
   ]
 }

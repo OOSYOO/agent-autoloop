@@ -9,7 +9,18 @@ import { test } from "node:test";
 import { installLocal } from "../cli/local-install.ts";
 
 const root = resolve(import.meta.dirname, "..");
-const entries = ["bin", "cli", "host", "kernel", "protocol", "worker", "plugins", "skills", "package.json"];
+const entries = [
+  "bin",
+  "cli",
+  "host",
+  "kernel",
+  "protocol",
+  "worker",
+  "plugins",
+  "skills",
+  "dashboard",
+  "package.json",
+];
 function fixture(target: string) {
   mkdirSync(target);
   for (const entry of entries) cpSync(join(root, entry), join(target, entry), { recursive: true });

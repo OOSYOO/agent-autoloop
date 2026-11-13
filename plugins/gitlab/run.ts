@@ -131,6 +131,11 @@ async function main() {
     throw new Error("当前 MR 未满足审查条件");
   const refs = { head_sha: selected.headSha };
   const mrUrl = `${config.instanceUrl}/${project.projectPath}/-/merge_requests/${selected.mrIid}`;
+  const reviewContext = {
+    projectPath: project.projectPath!,
+    mrIid: selected.mrIid,
+    title: typeof mr.title === "string" ? mr.title : "",
+  };
   const root = join(config.dataRoot, "gitlab");
   const cached = completedReport(root, project.id, selected.mrIid, selected.headSha);
   let report: any, modelReport, audit: string | undefined;
@@ -263,7 +268,7 @@ async function main() {
     }
     const visible = modelReport.findings.filter((finding) => finding.severity === "P2" || finding.severity === "P3");
     if (!modelReport.findings.length || visible.length) {
-      const pages = findingsPages(mrUrl, visible, split.manual.items);
+      const pages = findingsPages(mrUrl, visible, split.manual.items, reviewContext);
       if (split.manual.items.length) {
         const manualHash = saveArtifact(root, "manifests", { ...split.manual, ...requestBinding });
         const saved = await resumeSaved(latestConfig, manualHash, args[1]);
@@ -288,7 +293,7 @@ async function main() {
             `待确认：发布 ${split.manual.items.length} 条审查评论`,
             pages.length === 1
               ? pages[0]
-              : reviewSummary(mrUrl, visible, split.manual.items.length) +
+              : reviewSummary(mrUrl, visible, split.manual.items.length, reviewContext) +
                   `\n完整报告共 ${pages.length} 页，见配套通知。`,
             { schema: 1, kind: "publish", manifestHash: manualHash },
             [`发布 ${split.manual.items.length} 条评论`, "不发布"],
@@ -310,7 +315,7 @@ async function main() {
     ...manifest(config.instanceKey, project.id, selected.mrIid, reportHash, reportPolicy, refs, modelReport.findings),
     ...requestBinding,
   };
-  const pages = findingsPages(mrUrl, modelReport.findings, value.items);
+  const pages = findingsPages(mrUrl, modelReport.findings, value.items, reviewContext);
   if (!value.items.length) {
     pages.forEach((text, index) =>
       notices.push({
@@ -374,7 +379,7 @@ async function main() {
     `待确认：发布 ${value.items.length} 条审查评论`,
     pages.length === 1
       ? pages[0]
-      : reviewSummary(mrUrl, modelReport.findings, value.items.length) +
+      : reviewSummary(mrUrl, modelReport.findings, value.items.length, reviewContext) +
           `\n完整报告共 ${pages.length} 页，见配套通知。`,
     { schema: 1, kind: "publish", manifestHash },
     [`发布 ${value.items.length} 条评论`, "不发布"],

@@ -253,6 +253,8 @@ test("GitLab event and answer travel through the real Hub and Worker receipt", a
     );
     assert.equal(staleServer.status, 0, staleServer.stderr);
     assert.match(staleServer.stdout, /待确认：发布 \d+ 条审查评论/);
+    const identified = resultFrom(readMessage(staleServer.stdout), {}).result.ask![0];
+    assert.match(identified.text, /仓库：team\/app\nMR：!7\nMR 标题：修复审查原因/);
     rmSync(join(root, "gitlab", "reports"), { recursive: true, force: true });
     assert.equal(existsSync(join(root, "posts.log")), false);
     assert.equal(existsSync(join(hubHome, "cache.git")), false);
