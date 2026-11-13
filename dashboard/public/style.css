@@ -236,3 +236,11 @@ a {
     margin-top: 20px;
   }
 }
+
+.card-preview {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  color: var(--text);
+  margin-top: 6px;
+}

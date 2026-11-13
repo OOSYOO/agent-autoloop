@@ -4,8 +4,9 @@ type Item = {
   body: string;
   position: { old_path?: string; new_path?: string; old_line?: number; new_line?: number } | null;
 };
-export function findingsPages(url: string, findings: Finding[], items: Item[]): string[] {
-  const header = reviewSummary(url, findings, items.length);
+type ReviewContext = { projectPath: string; mrIid: number; title: string };
+export function findingsPages(url: string, findings: Finding[], items: Item[], context?: ReviewContext): string[] {
+  const header = reviewSummary(url, findings, items.length, context);
   if (!findings.length) return [header];
   const descriptions = findings
     .map((f, i) => {
@@ -36,8 +37,11 @@ export function findingsPages(url: string, findings: Finding[], items: Item[]): 
   );
 }
 
-export function reviewSummary(url: string, findings: Finding[], count: number): string {
-  if (!findings.length) return `${url}\n\n未发现问题，仍需人工审核。`;
+export function reviewSummary(url: string, findings: Finding[], count: number, context?: ReviewContext): string {
+  const identity = context
+    ? `仓库：${context.projectPath}\nMR：!${context.mrIid}\nMR 标题：${context.title.replace(/\s+/g, " ").trim() || "未提供标题"}\n${url}`
+    : url;
+  if (!findings.length) return `${identity}\n\n未发现问题，仍需人工审核。`;
   const short = (text: string, limit: number) => {
     const line = text.replace(/\s+/g, " ").trim();
     const chars = [...line];
@@ -50,5 +54,5 @@ export function reviewSummary(url: string, findings: Finding[], count: number): 
         `[${f.severity}${f.severity === "P3" ? " · 仅供参考" : ""}] ${short(f.title, 70)}\n${short(f.impact, 100)}\n建议：${short(f.suggestion, 100)}`,
     )
     .join("\n\n");
-  return `${url}\n\n${preview}${findings.length > 5 ? `\n\n另有 ${findings.length - 5} 条问题，见完整报告。` : ""}\n\n${count ? `确认后，将在这条 MR 下发布 ${count} 条问题的完整评论。` : "以下问题仅供参考，无需确认发布。"}`;
+  return `${identity}\n\n${preview}${findings.length > 5 ? `\n\n另有 ${findings.length - 5} 条问题，见完整报告。` : ""}\n\n${count ? `确认后，将在这条 MR 下发布 ${count} 条问题的完整评论。` : "以下问题仅供参考，无需确认发布。"}`;
 }

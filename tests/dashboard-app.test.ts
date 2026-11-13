@@ -290,3 +290,13 @@ test("polling preserves every interactive detail control and pending-card button
   await f.app.refresh();
   assert.equal(f.document.activeElement?.id, open.id);
 });
+
+// Failure mode: context exists in the model but never reaches the pending list.
+test("pending list shows repository, MR number and title before opening details", async () => {
+  const identity = "仓库：team/app\nMR：!7\nMR 标题：修复登录状态";
+  const f = app(async () => response({ ...state(), cards: [{ ...card(), text: identity + "\n\n完整报告" }] }));
+  await f.app.ready;
+  const textOf = (node: any): string => node.textContent + node.children.map(textOf).join("");
+  assert.match(textOf(f.document.nodes.waiting), /仓库：team\/app\nMR：!7\nMR 标题：修复登录状态/);
+  assert.equal(f.document.nodes.detail.hidden, true);
+});

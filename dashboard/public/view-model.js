@@ -90,7 +90,13 @@ export function safeLink(value) {
 }
 /** @param {State} state */
 export function buildOverviewModel(state) {
-  const cards = state.cards.filter((card) => card.state === "open");
+  const cards = state.cards
+    .filter((card) => card.state === "open")
+    .map((card) => {
+      const paragraph = card.text.trim().split(/\r?\n\s*\r?\n/, 1)[0];
+      const chars = [...paragraph];
+      return { ...card, preview: chars.length > 300 ? chars.slice(0, 300).join("") + "…" : paragraph };
+    });
   return {
     cards,
     waiting: cards.length,

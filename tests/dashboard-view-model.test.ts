@@ -39,3 +39,15 @@ test("only open cards and scheduled rules; timezone and upstream round counts su
   assert.equal(safeLink("javascript:alert(1)"), null);
   assert.equal(safeLink("https://example.test"), "https://example.test/");
 });
+
+// Failure mode: the list hides the task identity that its source already put in the card body.
+test("pending cards preview the first paragraph as bounded plain text, without dropping MR identity", () => {
+  const header =
+    "仓库：team/app\nMR：!7\nMR 标题：修复登录状态\nhttps://gitlab.example.com/team/app/-/merge_requests/7";
+  const value = { ...state(), cards: [{ ...card(), text: header + "\n\n完整报告：\n<script>报告</script>" }] };
+  assert.equal(buildOverviewModel(value).cards[0].preview, header);
+  assert.equal(
+    [...buildOverviewModel({ ...value, cards: [{ ...card(), text: "字".repeat(500) }] }).cards[0].preview].length,
+    301,
+  );
+});

@@ -165,3 +165,5 @@ GitLab 审查只准备可信 main 工作目录，然后启动原生 Codex，发�
 先运行 `agent-autoloop check` 核对唯一事件路由再启用 cron。新增类型为 `gitlab` 来源下的 `feishu.review.request`，只含本地证据编号；处理程序只读取匹配编号的本地证据，不接受事件文字提供的覆盖权限。中台和 Worker 的规则副本必须一致。此功能为显式启用；旧配置和 HTTP 协议不变。
 
 多 Worker 部署时，每份飞书配置设置唯一 `route`（例如 `app`、`ek001`），对应规则类型改为 `feishu.review.request.app`、`feishu.review.request.ek001`。消息编号也按 route 隔离，避免同实例不同仓库抢占事件。只让一台 Worker 保持默认 `askUnmatched: true`，其他设置为 false：无明确目标的请求只问一次；明确指向其他仓库的链接忽略，不派错机器。各机仍使用自己的 GitLab 配置、数据与凭据。
+
+审查卡片的正文首段列出仓库路径、MR 编号及 GitLab 提供的 MR 标题；本地看板直接预览该首段，完整报告与确认动作仍保留。已有卡片内容不可变，不为补展示资料重审同一 head 或重写旧决定；仅旧资料缺标题时不编造，可在原链接查看。

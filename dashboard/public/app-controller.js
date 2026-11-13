@@ -212,6 +212,7 @@ export function startDashboardApp({
             "meta",
           ),
         );
+        if (card.preview) row.append(el("p", card.preview, "card-preview"));
         waiting.append(row);
       }
       const scheduled = root("scheduled");
