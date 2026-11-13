@@ -2,7 +2,7 @@
 
 - 方案：../specs/local_dashboard.md；计划：../plans/local_dashboard.md 新方案执行。
 - 起点及被测实现：`52063bd`，分支 `main`。无新工程范围；M4 已完成完整实现，M5 核实安装和整体交付，组织本人 L4。
-- 状态：本地工程门禁完成，累计独立审查 findings 为空；本人 L4 未完成。最终累计审查 1/3，CI 修复 0/3。
+- 状态：本地工程门禁完成，累计独立审查 findings 为空；本人 L4 未完成。最终累计审查 2/3，CI 修复 0/3。
 
 ## 自动验证与范围证据
 
@@ -29,8 +29,18 @@ M4 的 417 项全量测试含 200000 步模拟、40320 条穷举路径；之后�
 
 ## 已就绪的临时环境与通知
 
-- 被测代码 `52063bd`；临时页面 `http://127.0.0.1:50125/`，临时中台 `http://127.0.0.1:51821/`。最终代码启动后浏览器已重载，初始待处理 2。
-- 仅为验收保留的进程：PID `43172`，入口 `/tmp/local-dashboard-preview.ts`（工具会话 21587）；临时 HOME `/var/folders/fs/00kc56d1769dl22sthd1vxqh0000gn/T/local-dashboard-acceptance-sCFISM`。不修改真实 HOME；SIGTERM 会清理临时数据。
+- 被测代码 `52063bd`；临时页面 `http://127.0.0.1:50125/`，临时中台 `http://127.0.0.1:55506/`。最终代码启动后浏览器已重载，初始待处理 2。
+- 仅为验收保留的进程：PID `67119`，入口 `/tmp/local-dashboard-preview.ts`（工具会话 74749）；临时 HOME `/var/folders/fs/00kc56d1769dl22sthd1vxqh0000gn/T/local-dashboard-acceptance-sQPmQU`。不修改真实 HOME；SIGTERM 会清理临时数据。
 - 最终累计审查：新子 agent 审查 `a7b6acb..52063bd`，findings 为空，定向测试 21 项通过。
 - 按 deliver 通知规则，通过 lark-im 以 bot 身份给本人发出 L4 就绪私信，CLI 返回 ok=true，消息 `om_x100b605c62438cbcceebfde78e347b7`。当前会话无专用桌面通知工具，桌面通知未发送；会话和飞书通知可用于本次请求。
 - MVP 工程能力已就绪，主观可读性及本人试用价值未验证；M5 未结束，不自动扩展任务。
+
+## 本人反馈修订：待处理摘要需要明确对象
+
+用户未确认 L4 通过，而是要求列表直接显示仓库、MR 编号和 MR 标题。已在 `13256e8` 修订：GitLab 从已读取的 MR 资料补充报告及确认正文首段；分页容量包含该说明。看板展示任意卡片的纯文本首段预览（最多 300 字加省略号），详情保留全文。不主动请求 GitLab，不重写既有卡片或猜测缺失标题，审批授权语义不变。
+
+- 新增 presentation/view-model 测试先因缺少身份资料和 preview 失败，实现后通过；真实 GitLab 插件 receipt 和实际列表渲染也有回归覆盖。
+- `npm run test:quick`：417 项通过，日志 `/tmp/local-dashboard-mr-quick.log`；`npm run typecheck`、`npm run format:check`、`git diff --check` 通过。未修改 kernel/protocol/sim，未重复此前模拟穷举。被测代码对应 `13256e8`，测试时为未提交工作树，提交前未再改代码。
+- 最终累计第 2/3 轮独立审查 `1e2f930..本次修订`，findings 为空。
+- 浏览器重载后首页直接显示 demo/workflow、!42 和“修复登录后任务列表不刷新的问题”。截图：`/Users/shenyue/.codex/visualizations/2026/11/13/01a1d2dd-095e-7582-9379-3a00161df05b/mr-card-preview.png`。这些是临时验收示例，不是真实 MR。
+- 最新临时环境见上一节更新后的 PID/HOME/URL；M5 仍等待本人阅读与操作体验确认，未宣称完成。
