@@ -51,3 +51,19 @@ test("pending cards preview the first paragraph as bounded plain text, without d
     301,
   );
 });
+
+// Failure mode: MR identity takes four lines, or untrusted text becomes an unsafe hyperlink.
+test("MR header maps to one named HTTP link; incomplete and unsafe headers stay plain text", () => {
+  const header =
+    "仓库：team/app\nMR：!7\nMR 标题：修复 <登录> 状态\nhttps://gitlab.example.com/team/app/-/merge_requests/7";
+  const model = (text: string) => buildOverviewModel({ ...state(), cards: [{ ...card(), text }] }).cards[0];
+  assert.deepEqual(model(header).reference, {
+    label: "team/app !7：修复 <登录> 状态",
+    href: "https://gitlab.example.com/team/app/-/merge_requests/7",
+  });
+  assert.equal(
+    model(header.replace("https://gitlab.example.com/team/app/-/merge_requests/7", "javascript:alert(1)")).reference,
+    null,
+  );
+  assert.equal(model(header.split("\n").slice(0, 3).join("\n")).reference, null);
+});

@@ -300,3 +300,21 @@ test("pending list shows repository, MR number and title before opening details"
   assert.match(textOf(f.document.nodes.waiting), /仓库：team\/app\nMR：!7\nMR 标题：修复登录状态/);
   assert.equal(f.document.nodes.detail.hidden, true);
 });
+
+// Failure mode: compact reference is not clickable, duplicates raw metadata, or loses focus on polling.
+test("MR reference is a single safe link with a stable focus target", async () => {
+  const identity =
+    "仓库：team/app\nMR：!7\nMR 标题：修复登录状态\nhttps://gitlab.example.com/team/app/-/merge_requests/7";
+  const f = app(async () => response({ ...state(), cards: [{ ...card(), text: identity + "\n\n完整报告" }] }));
+  await f.app.ready;
+  const walk = (node: any): any[] => [node, ...node.children.flatMap(walk)];
+  const link = walk(f.document.nodes.waiting).find((node) => node.tagName === "a");
+  assert.ok(link);
+  assert.equal(link.textContent, "team/app !7：修复登录状态");
+  assert.equal(link.href, "https://gitlab.example.com/team/app/-/merge_requests/7");
+  assert.equal(link.rel, "noopener noreferrer");
+  assert.ok(!walk(f.document.nodes.waiting).some((node) => node.textContent === identity));
+  link.focus();
+  await f.app.refresh();
+  assert.equal(f.document.activeElement?.id, link.id);
+});

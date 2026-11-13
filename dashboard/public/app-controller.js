@@ -212,7 +212,16 @@ export function startDashboardApp({
             "meta",
           ),
         );
-        if (card.preview) row.append(el("p", card.preview, "card-preview"));
+        if (card.reference) {
+          const reference = document.createElement("a");
+          reference.id = `reference-${card.id}`;
+          reference.className = "card-reference";
+          reference.textContent = card.reference.label;
+          reference.href = card.reference.href;
+          reference.target = "_blank";
+          reference.rel = "noopener noreferrer";
+          row.append(reference);
+        } else if (card.preview) row.append(el("p", card.preview, "card-preview"));
         waiting.append(row);
       }
       const scheduled = root("scheduled");

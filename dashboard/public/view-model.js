@@ -95,7 +95,11 @@ export function buildOverviewModel(state) {
     .map((card) => {
       const paragraph = card.text.trim().split(/\r?\n\s*\r?\n/, 1)[0];
       const chars = [...paragraph];
-      return { ...card, preview: chars.length > 300 ? chars.slice(0, 300).join("") + "…" : paragraph };
+      const identity = /^仓库：([^\r\n]+)\r?\nMR：!([1-9]\d*)\r?\nMR 标题：([^\r\n]+)\r?\n([^\r\n]+)$/.exec(paragraph);
+      const href = identity ? safeLink(identity[4]) : null;
+      const reference =
+        identity && href ? { label: identity[1] + " !" + identity[2] + "：" + identity[3], href } : null;
+      return { ...card, reference, preview: chars.length > 300 ? chars.slice(0, 300).join("") + "…" : paragraph };
     });
   return {
     cards,

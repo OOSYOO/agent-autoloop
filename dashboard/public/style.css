@@ -244,3 +244,9 @@ a {
   color: var(--text);
   margin-top: 6px;
 }
+
+.card-reference {
+  display: block;
+  font-weight: 600;
+  margin-top: 6px;
+}
